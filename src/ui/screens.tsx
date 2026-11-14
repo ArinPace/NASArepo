@@ -153,10 +153,10 @@ export function Pitch({ d, set, setDesign }: { d: Design; set: Set; setDesign: (
             </button>
           ))}
         </div>
-        <p className="muted small">{brief.name}: building starts on {fmtDate(brief.startJd)}. A {klass.name} cannot launch before {fmtDate(brief.startJd + klass.devMonths * 30.44)}. Cost caps and build times are game values.</p>
+        <p className="muted small">{brief.name}: building starts on {fmtDate(brief.startJd)}. {klass.name} missions cannot launch before {fmtDate(brief.startJd + klass.devMonths * 30.44)}. Cost caps and build times are game values.</p>
       </section>
       <section className="panel">
-        <h3>Science objectives <span className="num">{points} points chosen · {target} is a full score for a {klass.name}</span></h3>
+        <h3>Science objectives <span className="num">{points} points chosen · {target} is a full score for the {klass.name} class</span></h3>
         <div className="grid two">
           {OBJECTIVES.map((o) => {
             const on = d.objectives.includes(o.id);
@@ -319,7 +319,7 @@ export function Thousand({ d, b, mc, stale, run, set }: { d: Design; b: Budgets;
               <div><div className="score" style={{ fontSize: '3.4rem' }}>{pct(mc.survive)}</div><div className="small muted">survive</div></div>
             </div>
             <div className="chart-wrap"><OddsChart mc={mc} /></div>
-            <p className="small muted">Success means the spacecraft survives and returns at least half the science a {b.klass.name} should.</p>
+            <p className="small muted">Success means the spacecraft survives and returns at least half the science expected of the {b.klass.name} class.</p>
             {mc.problems.length > 0 && (
               <table><thead><tr><th>What went wrong most often</th><th className="r">Flights</th></tr></thead>
                 <tbody>{mc.problems.map((p) => <tr key={p.title}><td>{p.title}</td><td className="r num">{pct(p.share)}</td></tr>)}</tbody></table>

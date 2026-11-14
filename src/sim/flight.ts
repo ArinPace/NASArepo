@@ -613,7 +613,7 @@ export interface Score {
 export function scoreFlight(res: FlightResult, b: Budgets, gates: GateRecord[], odds: number | null, players: number): Score {
   const notes: Record<string, string> = {};
   const science = 40 * Math.min(1, res.sciencePoints / b.klass.scienceTarget);
-  notes.science = `${res.sciencePoints.toFixed(0)} science points against a ${b.klass.name} target of ${b.klass.scienceTarget}.`;
+  notes.science = `${res.sciencePoints.toFixed(0)} science points against the ${b.klass.name} target of ${b.klass.scienceTarget}.`;
   const arrivedAsPlanned = res.launched && !res.becameFlyby && !res.lost;
   const performance = (res.launched ? 4 : 0) + (arrivedAsPlanned ? 6 : res.becameFlyby ? 2 : 0) + (res.launched && !res.lost ? 4 : 0) + 6 * Math.min(1, res.opsDaysDone / res.opsDaysPlanned);
   notes.performance = !res.launched ? 'The mission never flew.' : res.lost ? `Lost: ${res.lostWhy.toLowerCase()}.` : res.becameFlyby ? 'Reached Apophis but could not stay.' : `Operated ${Math.round(res.opsDaysDone)} of ${Math.round(res.opsDaysPlanned)} planned days.`;

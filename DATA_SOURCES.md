@@ -31,7 +31,8 @@ the game, not copied from a source. Game values are labelled as such in the game
 | Lunar orbit (for the second scenario) | Patched conics | 50 km orbit: 113 min period, 48 min maximum eclipse, as for Lunar Reconnaissance Orbiter |
 
 The start screen of the game has a "How real is this?" panel that reruns the
-first six of these checks, plus an Earth-orbit check, in the browser.
+position, launch window, rocket, solar power and data rate checks, plus an
+Earth-orbit check, in the browser.
 
 ## Known simplifications
 

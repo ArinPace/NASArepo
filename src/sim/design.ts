@@ -1,11 +1,11 @@
 // The design model: what the players choose, and the budgets that follow
 // from those choices (mass, power, data, cost, time, delta-v).
 import {
-  AU_KM, G0, Transfer, earthDistanceKm, elementsFromState, norm, stateFromElements, transferTo, jdFromDate, earthState,
+  AU_KM, EARTH_MOON_KM, G0, MU_EARTH, MU_MOON, R_EARTH, R_MOON, Transfer, captureDv, earthDistanceKm, elementsFromState, lunarTransferC3, maxEclipseFraction, norm, orbitPeriodS, stateFromElements, transferTo, jdFromDate, earthState,
 } from './astro';
 import {
   ADCS, ANTENNAS, APOPHIS, ARRAY, BATTERIES, CLASSES, ClassId, DSN, FLYBY_PASSES, INSTRUMENTS, MissionClass, OBJECTIVES,
-  PROPS, briefOf, RADIOS, REDUNDANCY, ROCKETS, Redundancy, Rocket, STANDOFFS, STORAGES, TESTS, rocketCapacityKg,
+  MOON, MOON_ORBITS, PROPS, briefOf, instrumentsFor, objectivesFor, RADIOS, REDUNDANCY, ROCKETS, Redundancy, Rocket, STANDOFFS, STORAGES, TESTS, rocketCapacityKg,
 } from './data';
 
 export const MIN_TOF_DAYS = 40;
@@ -41,6 +41,7 @@ export interface Design {
   reservePct: number;
   tests: string[];
   dsnHoursPerDay: number;
+  months?: number; // Ice Hunter: how long to map
 }
 
 /** The arrival date that needs the least braking for a given launch date. */
@@ -56,6 +57,14 @@ export function bestArrival(launchJd: number, minBeforeDays = 20): number {
 export function defaultDesign(klass: ClassId = 'explorer', scenario = 'apophis'): Design {
   // A lean, valid starting point on a mediocre launch date. Finding the good
   // window and fitting the craft to the science is the players' job.
+  if (scenario === 'moon') {
+    return normalise({
+      scenario, klass, objectives: ['ice'], missionType: 'rendezvous', launchJd: 0, arriveJd: 0, standoff: 'far', months: 6,
+      rocket: klass === 'smallsat' ? 'shared' : klass === 'explorer' ? 'f9r' : 'f9', instruments: ['lend'],
+      arrayM2: 2, autoArray: true, battery: 'b1', antenna: 'mga', radio: 'r5', prop: 'mono', adcs: 'basic', storage: 's1',
+      redundancy: 'single', reservePct: 10, tests: [], dsnHoursPerDay: 4,
+    });
+  }
   const late = scenario === 'lastcall';
   const launchJd = late ? jdFromDate(2029, 1, 20) : jdFromDate(2028, 6, 20);
   return {
@@ -68,6 +77,45 @@ export function defaultDesign(klass: ClassId = 'explorer', scenario = 'apophis')
 }
 
 const find = <T extends { id: string }>(list: T[], id: string): T => list.find((x) => x.id === id) ?? list[0];
+
+/** How long the spacecraft takes to build, and the day it is ready. */
+export function schedule(d: Design): { devMonths: number; readyJd: number } {
+  const klass = find(CLASSES, d.klass);
+  const tests = TESTS.filter((t) => d.tests.includes(t.id));
+  const newTech = instrumentsFor(d.scenario).filter((i) => d.instruments.includes(i.id) && i.trl < 7).length;
+  const devMonths = klass.devMonths + REDUNDANCY[d.redundancy].months + newTech + (tests.reduce((s, t) => s + t.weeks, 0) * 0.6) / 4.345; // tests overlap with assembly
+  return { devMonths, readyJd: briefOf(d.scenario).startJd + devMonths * 30.44 };
+}
+
+/** Ice Hunter has no launch window: the spacecraft leaves two weeks after it is ready. */
+export function normalise(d: Design): Design {
+  if (d.scenario !== 'moon') return d;
+  const launchJd = Math.ceil(schedule(d).readyJd) + 14.5;
+  const arriveJd = launchJd + MOON.transitDays;
+  return d.launchJd === launchJd && d.arriveJd === arriveJd ? d : { ...d, launchJd, arriveJd };
+}
+
+/** Speed relative to the Moon on arrival from a minimum-energy transfer, km/s. */
+export function moonArrivalSpeed(): number {
+  const a = (R_EARTH + 200 + EARTH_MOON_KM) / 2;
+  const vApogee = Math.sqrt(MU_EARTH * (2 / EARTH_MOON_KM - 1 / a));
+  return Math.sqrt(MU_EARTH / EARTH_MOON_KM) - vApogee;
+}
+
+/** The trip to a polar orbit of the Moon, in the same terms as the trip to Apophis. */
+export function moonTrajectory(d: Design): Traj {
+  const orbit = find(MOON_ORBITS, d.standoff);
+  const months = d.months ?? 12;
+  const r = R_MOON + orbit.km;
+  const vinf = moonArrivalSpeed();
+  const dvArrive = captureDv(MU_MOON, vinf, r, r);
+  const dvOps = 0.03 + (orbit.skMsYr / 1000) * (months / 12);
+  const opsStartJd = d.arriveJd + MOON.commissionDays;
+  return {
+    ok: true, c3: lunarTransferC3(), vinfArr: vinf, tofDays: MOON.transitDays, dvArrive, dvOps, dvTotal: (dvArrive + dvOps) * 1.1,
+    sunAuMax: 1.02, sunAuMin: 0.98, opsStartJd, opsEndJd: opsStartJd + months * 30.44, beforeDays: 0, rangeKm: orbit.km, vRel: 0,
+  };
+}
 
 export interface Traj {
   ok: boolean;
@@ -166,12 +214,13 @@ export interface Budgets {
 }
 
 export function evaluate(d: Design, trajIn?: Traj): Budgets {
-  const traj = trajIn ?? trajectory(d);
+  const moon = d.scenario === 'moon';
+  const traj = trajIn ?? (moon ? moonTrajectory(d) : trajectory(d));
   const brief = briefOf(d.scenario);
   const klass0 = find(CLASSES, d.klass);
   const klass = brief.targetMult === 1 && brief.capMult === 1 ? klass0 : { ...klass0, scienceTarget: Math.round(klass0.scienceTarget * brief.targetMult), capM: klass0.capM * brief.capMult };
   const rocket = find(ROCKETS, d.rocket);
-  const instruments = INSTRUMENTS.filter((i) => d.instruments.includes(i.id));
+  const instruments = instrumentsFor(d.scenario).filter((i) => d.instruments.includes(i.id));
   const antenna = find(ANTENNAS, d.antenna), radio = find(RADIOS, d.radio), prop = find(PROPS, d.prop);
   const battery = find(BATTERIES, d.battery), storage = find(STORAGES, d.storage), adcs = find(ADCS, d.adcs);
   const red = REDUNDANCY[d.redundancy];
@@ -184,7 +233,10 @@ export function evaluate(d: Design, trajIn?: Traj): Budgets {
   const comm = busW + radio.powerW + payloadW * 0.2;
   const safe = busW * 0.6;
   const worst = Math.max(science, comm);
-  const wPerM2 = (ARRAY.wPerM2At1Au / (traj.sunAuMax * traj.sunAuMax)) * 0.92;
+  // In lunar orbit the panels are dark for part of every lap, and must also recharge the battery.
+  const nightFrac = moon ? maxEclipseFraction(R_MOON, R_MOON + traj.rangeKm) : 0;
+  const nightH = moon ? (orbitPeriodS(MU_MOON, R_MOON + traj.rangeKm) / 3600) * nightFrac : 0;
+  const wPerM2 = (ARRAY.wPerM2At1Au / (traj.sunAuMax * traj.sunAuMax)) * 0.92 * (1 - nightFrac * 1.15);
   const arrayM2 = d.autoArray ? Math.max(0.5, Math.ceil(((worst * 1.3) / wPerM2) * 4) / 4) : d.arrayM2;
   const arrayW = arrayM2 * wPerM2;
   const power = { arrayW, science, comm, safe, worst, margin: (arrayW - worst) / worst };
@@ -207,8 +259,8 @@ export function evaluate(d: Design, trajIn?: Traj): Budgets {
   // ----- data
   let earthKmMax = 0, earthKmMin = Infinity;
   for (let jd = traj.opsStartJd; jd <= traj.opsEndJd + 0.01; jd += Math.max(0.5, (traj.opsEndJd - traj.opsStartJd) / 40)) {
-    const km = earthDistanceKm(APOPHIS.elements, jd);
-    earthKmMax = Math.max(earthKmMax, km); earthKmMin = Math.min(earthKmMin, km);
+    const km = moon ? MOON.earthKmMax : earthDistanceKm(APOPHIS.elements, jd);
+    earthKmMax = Math.max(earthKmMax, km); earthKmMin = Math.min(earthKmMin, moon ? MOON.earthKmMin : km);
   }
   const genGbDay = (instruments.reduce((s, i) => s + i.dataMbPerHour, 0) * SCIENCE_HOURS_PER_DAY) / 1000;
   const kbpsWorst = dataRateKbps(radio.rfW, antenna.gainDb, earthKmMax, radio.maxMbps);
@@ -233,10 +285,9 @@ export function evaluate(d: Design, trajIn?: Traj): Budgets {
   const cost = { hardware, wraps, launch: rocket.priceM, ops, tests: testCost, dsn, estimate, reserve, total: estimate + reserve, cap: klass.capM, margin: (klass.capM - estimate - reserve) / klass.capM };
 
   // ----- time
-  const newTech = instruments.filter((i) => i.trl < 7).length;
-  const devMonths = klass.devMonths + red.months + newTech + (tests.reduce((s, t) => s + t.weeks, 0) * 0.6) / 4.345; // tests overlap with assembly
-  const readyJd = brief.startJd + devMonths * 30.44;
-  const time = { devMonths, readyJd, slackDays: d.launchJd - readyJd, missionMonths };
+  const { devMonths, readyJd } = schedule(d);
+  // For Apophis, time is slack before the launch date. For the Moon it is slack before the decision date.
+  const time = { devMonths, readyJd, slackDays: moon ? MOON.deadlineJd - traj.opsEndJd : d.launchJd - readyJd, missionMonths };
 
   // ----- image detail
   const cams = instruments.filter((i) => i.ifovUrad);
@@ -265,14 +316,15 @@ export function evaluate(d: Design, trajIn?: Traj): Budgets {
   if (d.redundancy === 'single' && d.klass === 'flagship') add('string', 'craft', 'amber', 'A flagship with no backups. Class A missions are expected to survive any single failure.', 'Add backups.');
   if (d.redundancy === 'full' && d.klass === 'smallsat') add('string', 'craft', 'amber', 'Full backups on a SmallSat. The mass and cost may outweigh the benefit.', 'Consider selective backups.');
   for (const id of d.objectives) {
-    const o = OBJECTIVES.find((x) => x.id === id)!;
+    const o = objectivesFor(d.scenario).find((x) => x.id === id);
+    if (!o) continue;
     if (!o.instruments.some((i) => d.instruments.includes(i))) add(`obj-${id}`, 'science', 'red', `"${o.name}" has no instrument that can measure it.`, `Add one of: ${o.instruments.map((i) => INSTRUMENTS.find((x) => x.id === i)!.short).join(', ')}.`);
-    if (d.missionType === 'flyby' && o.segments.length > 1) add(`obj-seg-${id}`, 'science', 'red', `"${o.name}" needs you to stay with the asteroid. A flyby is gone in minutes.`, 'Switch to a rendezvous or drop this objective.');
+    if (!moon && d.missionType === 'flyby' && o.segments.length > 1) add(`obj-seg-${id}`, 'science', 'red', `"${o.name}" needs you to stay with the asteroid. A flyby is gone in minutes.`, 'Switch to a rendezvous or drop this objective.');
   }
   if (d.objectives.length === 0) add('obj-none', 'science', 'red', 'No science objective chosen.', 'Pick at least one.');
-  if (d.missionType === 'rendezvous' && traj.ok && traj.beforeDays < 14 && d.objectives.some((o) => o !== 'mass')) add('late', 'science', 'amber', `Only ${Math.round(traj.beforeDays)} days at the asteroid before the flyby. A full map takes about two weeks.`, 'Arrive earlier.');
+  if (!moon && d.missionType === 'rendezvous' && traj.ok && traj.beforeDays < 14 && d.objectives.some((o) => o !== 'mass')) add('late', 'science', 'amber', `Only ${Math.round(traj.beforeDays)} days at the asteroid before the flyby. A full map takes about two weeks.`, 'Arrive earlier.');
   if (d.instruments.includes('tele') && !adcs.precise) add('jitter', 'science', 'amber', 'The telescope will blur on basic pointing.', 'Fit precise pointing.');
-  if (d.standoff === 'close' && !adcs.precise && d.missionType === 'rendezvous') add('close', 'science', 'amber', 'Flying 1 km from a tumbling asteroid on basic pointing is risky.', 'Fit precise pointing or stand off at 5 km.');
+  if (!moon && d.standoff === 'close' && !adcs.precise && d.missionType === 'rendezvous') add('close', 'science', 'amber', 'Flying 1 km from a tumbling asteroid on basic pointing is risky.', 'Fit precise pointing or stand off at 5 km.');
   if (genGbDay > downGbDayWorst * 1.02) {
     const level = fillDays < 5 ? 'red' : 'amber';
     add('data', 'comms', level, `Instruments make ${genGbDay.toFixed(1)} Gb a day. At the farthest point you can send ${downGbDayWorst.toFixed(1)} Gb. The recorder fills in ${fillDays.toFixed(0)} days.`, 'Bigger dish, stronger transmitter, more network hours, or a bigger recorder.');
@@ -281,9 +333,20 @@ export function evaluate(d: Design, trajIn?: Traj): Budgets {
   if (d.antenna === 'hga2' && !adcs.precise) add('dish-point', 'comms', 'amber', 'A 2 m dish has a beam narrower than basic pointing can hold.', 'Fit precise pointing or a smaller dish.');
   if (cost.margin < 0) add('cost', 'design', 'red', `Over the cost cap by $${Math.round(cost.total - cost.cap)}M.`, 'Cut hardware, tests or the rocket. Or lower reserves and accept the risk.');
   else if (d.reservePct < 15) add('reserve', 'design', 'amber', `Cost reserve is ${d.reservePct}%. Projects this early usually hold 20% or more.`, 'Raise reserves if the cap allows.');
-  if (traj.ok && time.slackDays < 0) add('late-build', 'design', 'red', `The spacecraft will not be ready. It needs ${Math.round(-time.slackDays)} more days before launch.`, 'Launch later, drop tests or new technology, or pick a smaller class.');
+  if (moon) {
+    const lost = -time.slackDays;
+    const mapDays = traj.opsEndJd - traj.opsStartJd;
+    if (lost >= mapDays) add('m-late', 'design', 'red', `Mapping would not start until after the landing site is chosen on ${fmtJd(MOON.deadlineJd)}. Nothing the mission finds would count.`, 'Drop tests or backups, or pick a smaller class, so the spacecraft is ready sooner.');
+    else if (lost > 0) add('m-late', 'design', 'amber', `The last ${Math.round(lost)} days of mapping come after the landing site is chosen on ${fmtJd(MOON.deadlineJd)}. Data from those days will not count.`, 'Fly a shorter mission, or get ready sooner.');
+    const battery0 = battery.wh * 0.7;
+    if (battery0 < worst * nightH) add('battery', 'craft', 'red', `Every lap has ${Math.round(nightH * 60)} minutes of night behind the Moon. Running through it takes ${Math.round((worst * nightH) / 0.7)} Wh and the battery holds ${battery.wh} Wh.`, 'Fit a bigger battery, or cut the power the spacecraft draws.');
+    const ecl = MOON.eclipses.filter((e) => e.jd > d.arriveJd && e.jd < traj.opsEndJd);
+    const need = ecl.length ? (safe * (Math.max(...ecl.map((e) => e.hours)) + nightH)) / 0.9 : 0;
+    if (ecl.length && battery.wh < need && battery0 >= worst * nightH) add('eclipse', 'craft', 'amber', `Earth's shadow covers the Moon on ${ecl[0].name}. With everything switched off the spacecraft still needs ${Math.round(need)} Wh to last ${Math.max(...ecl.map((e) => e.hours)).toFixed(1)} dark hours, and the battery holds ${battery.wh} Wh.`, 'Fit a bigger battery, or end the mission before the eclipse.');
+    if (traj.rangeKm <= 30 && d.redundancy === 'single') add('low', 'craft', 'amber', 'A 30 km orbit decays within weeks if a correcting burn is missed, and this spacecraft has no backup computer to fly it.', 'Add backups, or map from 50 km.');
+  } else if (traj.ok && time.slackDays < 0) add('late-build', 'design', 'red', `The spacecraft will not be ready. It needs ${Math.round(-time.slackDays)} more days before launch.`, 'Launch later, drop tests or new technology, or pick a smaller class.');
   else if (traj.ok && time.slackDays < 30) add('slack', 'design', 'amber', `Only ${Math.round(time.slackDays)} days of schedule slack before launch.`, 'One late part and you miss the window.');
-  if (rocket.shared && time.slackDays >= 0) add('shared', 'design', 'amber', 'A shared ride leaves when the main passenger is ready, not when you are.', 'Carry extra propellant, or buy your own rocket.');
+  if (rocket.shared && (moon || time.slackDays >= 0)) add('shared', 'design', 'amber', 'A shared ride leaves when the main passenger is ready, not when you are.', moon ? 'Leave spare weeks before the decision date, or buy your own rocket.' : 'Carry extra propellant, or buy your own rocket.');
 
   const consoles = { design: 'green', craft: 'green', science: 'green', comms: 'green' } as Record<ConsoleId, 'green' | 'amber' | 'red'>;
   for (const x of f) {
@@ -299,7 +362,7 @@ export function forGate(b: Budgets, stage: string): Budgets {
   const keep = (id: string) =>
     stage === 'pitch'
       ? id === 'obj-none'
-      : ['traj', 'late-build', 'slack', 'shared', 'late', 'cost', 'obj-none', 'mass', 'snowball'].includes(id) || id.startsWith('obj-seg-');
+      : ['traj', 'late-build', 'slack', 'shared', 'late', 'cost', 'obj-none', 'mass', 'snowball', 'm-late'].includes(id) || id.startsWith('obj-seg-');
   const findings = b.findings.filter((f) => keep(f.id));
   const consoles = { design: 'green', craft: 'green', science: 'green', comms: 'green' } as Budgets['consoles'];
   for (const x of findings) {
@@ -326,6 +389,13 @@ export function snowball(before: Budgets, after: Budgets): SnowballStep[] {
   push('Cost', after.cost.total - before.cost.total, '$M', 0.05);
   return steps;
 }
+
+const fmtJd = (jd: number) => {
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const z = Math.floor(jd + 0.5), a = z + 32044, bb = Math.floor((4 * a + 3) / 146097), c = a - Math.floor((146097 * bb) / 4);
+  const dd = Math.floor((4 * c + 3) / 1461), e = c - Math.floor((1461 * dd) / 4), m = Math.floor((5 * e + 2) / 153);
+  return `${e - Math.floor((153 * m + 2) / 5) + 1} ${months[(m + 2) % 12]} ${100 * bb + dd - 4800 + Math.floor(m / 10)}`;
+};
 
 /** Earth to spacecraft distance during operations, km. */
 const memoE = new Map<number, number>(), memoS = new Map<number, number>();

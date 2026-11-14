@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
-import { Design, SnowballStep, evaluate, forGate, snowball } from './sim/design';
+import { Design, SnowballStep, evaluate, forGate, normalise, snowball } from './sim/design';
 import { GateRecord, monteCarlo, scoreFlight, simulate } from './sim/flight';
 import { DepthContext, Depth, Game, Poll, Rail, Run, STEPS, Stage, encodeShare, headlineOf, newGame, saveBest } from './ui/core';
 import { briefOf } from './sim/data';
@@ -32,7 +32,7 @@ function App({ boot }: { boot: Partial<Game> }) {
   const b = useMemo(() => evaluate(g.design), [g.design]);
   const update = (p: Partial<Game>) => setG((x) => ({ ...x, ...p }));
   const set = (patch: Partial<Design>) => {
-    const next = { ...g.design, ...patch };
+    const next = normalise({ ...g.design, ...patch });
     setRipple(snowball(b, evaluate(next)));
     update({ design: next });
   };
@@ -52,7 +52,7 @@ function App({ boot }: { boot: Partial<Game> }) {
     if (g.stage === 'test') update({ gates, calls: {}, flight: g.flight + 1, result: simulate(g.design, g.seed, b, {}), stage: 'fly', reached: Math.max(g.reached, 4) });
     else update({ gates, stage: STEPS[idx + 1].id, reached: Math.max(g.reached, idx + 1) });
   };
-  const setDesign = (design: Design) => { setRipple([]); update({ design }); };
+  const setDesign = (design: Design) => { setRipple([]); update({ design: normalise(design) }); };
   const call = (id: string, option: string) => {
     const calls = { ...g.calls, [id]: option };
     update({ calls, result: simulate(g.design, g.seed, b, calls) });

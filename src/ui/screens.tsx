@@ -1,13 +1,14 @@
 import { ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { C_KM_S, fmtDate, jdFromDate } from '../sim/astro';
 import {
-  ADCS, ANTENNAS, APOPHIS, ARRAY, BATTERIES, BRIEFS, CLASSES, DATA_CHECKED, FLYBY_PASSES, INSTRUMENTS, OBJECTIVES, PROPS, RADIOS, RAMSES_SRC,
-  REDUNDANCY, RISK_CLASS_SRC, ROCKETS, Redundancy, STANDOFFS, STORAGES, TESTS, rocketCapacityKg, Choice, briefOf,
+  ADCS, ANTENNAS, APOPHIS, ARRAY, BATTERIES, BRIEFS, CLASSES, DATA_CHECKED, FLYBY_PASSES, INSTRUMENTS, LRO_DATA_SRC, LRO_SRC, MOON, MOON_ORBITS, PROPS, RADIOS, RAMSES_SRC,
+  REDUNDANCY, RISK_CLASS_SRC, ROCKETS, Redundancy, STANDOFFS, STORAGES, TESTS, rocketCapacityKg, Choice, briefOf, instrumentsFor, objectivesFor,
 } from '../sim/data';
+import { moonNight } from '../sim/moon';
 import { Check, runChecks } from '../sim/checks';
 import { Budgets, CONSOLES, Design, LAST_ARRIVAL_JD, MIN_TOF_DAYS, SnowballStep, bestArrival, defaultDesign, earthKmAt, evaluate, snowball } from '../sim/design';
 import { FlightResult, McResult, monteCarlo, scoreFlight, simulate } from '../sim/flight';
-import { CostCurve, CraftView, LaunchChart, OddsChart, OrbitView, Postcard, RAMP_CSS, Telemetry } from './charts';
+import { CostCurve, CraftView, LaunchChart, MoonView, OddsChart, OrbitView, Postcard, RAMP_CSS, Telemetry } from './charts';
 import { Best, DepthContext, FindingRow, Game, Lamp, Poll, STEPS, SrcTag, Term, consoleOwners, loadBest, decodeShare, detail, diffDesign, encodeShare, headlineOf, kg, money, pct, rate } from './core';
 
 type Set = (patch: Partial<Design>) => void;
@@ -42,7 +43,7 @@ export function Setup({ g, update, start }: { g: Game; update: (p: Partial<Game>
         <div className="head" style={{ gap: 16 }}>
           <span className="eyebrow">A space mission design game on real NASA and JPL data</span>
           <h1><span className="go">Go</span> / <span className="nogo">No-Go</span></h1>
-          <p className="lede">Design a real mission to asteroid Apophis. Defend it at four review gates. Fly it, then find out which decision made the difference.</p>
+          <p className="lede">Design a real mission to asteroid Apophis, or to the ice at the Moon's south pole. Defend it at four review gates. Fly it, then find out which decision made the difference.</p>
           <p className="countdown"><b>{days.toLocaleString('en-US')}</b> days until Apophis passes 32,000 km above Earth on 13 April 2029. <SrcTag src={APOPHIS.flybySrc} /></p>
         </div>
         <figure style={{ margin: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
@@ -158,11 +159,15 @@ export function Pitch({ d, set, setDesign }: { d: Design; set: Set; setDesign: (
   const klass = CLASSES.find((c) => c.id === d.klass)!;
   const brief = briefOf(d.scenario);
   const target = Math.round(klass.scienceTarget * brief.targetMult);
-  const points = OBJECTIVES.filter((o) => d.objectives.includes(o.id)).reduce((s, o) => s + o.weight, 0);
+  const moon = d.scenario === 'moon';
+  const goals = objectivesFor(d.scenario);
+  const points = goals.filter((o) => d.objectives.includes(o.id)).reduce((s, o) => s + o.weight, 0);
   return (
     <>
       <Head eyebrow="Pre-Phase A · concept studies" title="Pitch the mission">
-        On 13 April 2029 a 340-metre asteroid passes closer to Earth than our television satellites. Earth's gravity will stretch it, shake it and bend its path. What do you want to learn, and how big a mission will you ask for?
+        {moon
+          ? 'Some crater floors at the Moon\'s south pole have not seen sunlight in perhaps billions of years, and orbiters have found signs of water ice in them. Before anyone lands there, somebody has to map it. What do you want to learn, and how big a mission will you ask for?'
+          : 'On 13 April 2029 a 340-metre asteroid passes closer to Earth than our television satellites. Earth\'s gravity will stretch it, shake it and bend its path. What do you want to learn, and how big a mission will you ask for?'}
       </Head>
       <section className="panel">
         <h3>Mission class <SrcTag src={RISK_CLASS_SRC} /></h3>
@@ -175,12 +180,12 @@ export function Pitch({ d, set, setDesign }: { d: Design; set: Set; setDesign: (
             </button>
           ))}
         </div>
-        <p className="muted small">{brief.name}: building starts on {fmtDate(brief.startJd)}. {klass.name} missions cannot launch before {fmtDate(brief.startJd + klass.devMonths * 30.44)}. Cost caps and build times are game values.</p>
+        <p className="muted small">{brief.name}: building starts on {fmtDate(brief.startJd)}. {klass.name} missions cannot launch before {fmtDate(brief.startJd + klass.devMonths * 30.44)}.{moon && ` The landing site is chosen on ${fmtDate(MOON.deadlineJd)} (a game premise), and only data sent home before then counts.`} Cost caps and build times are game values.</p>
       </section>
       <section className="panel">
         <h3>Science objectives <span className="num">{points} points chosen · {target} is a full score for the {klass.name} class</span></h3>
         <div className="grid two">
-          {OBJECTIVES.map((o) => {
+          {goals.map((o) => {
             const on = d.objectives.includes(o.id);
             return (
               <button type="button" key={o.id} className="card" role="checkbox" aria-checked={on} onClick={() => set({ objectives: on ? d.objectives.filter((x) => x !== o.id) : [...d.objectives, o.id] })}>
@@ -199,8 +204,8 @@ export function Pitch({ d, set, setDesign }: { d: Design; set: Set; setDesign: (
           <table>
             <thead><tr><th>Objective</th><th>Must observe</th><th>Instruments that can do it</th></tr></thead>
             <tbody>
-              {OBJECTIVES.filter((o) => d.objectives.includes(o.id)).map((o) => (
-                <tr key={o.id}><td>{o.name}</td><td>{o.segments.join(', ')} the flyby</td><td>{o.instruments.map((i) => INSTRUMENTS.find((x) => x.id === i)!.name).join(' or ')}</td></tr>
+              {goals.filter((o) => d.objectives.includes(o.id)).map((o) => (
+                <tr key={o.id}><td>{o.name}</td><td>{moon ? o.needs : `${o.segments.join(', ')} the flyby`}</td><td>{o.instruments.map((i) => INSTRUMENTS.find((x) => x.id === i)!.name).join(' or ')}</td></tr>
               ))}
               {d.objectives.length === 0 && <tr><td colSpan={3} className="muted">Pick an objective above.</td></tr>}
             </tbody>
@@ -212,6 +217,90 @@ export function Pitch({ d, set, setDesign }: { d: Design; set: Set; setDesign: (
 }
 
 // ================================================================ route
+function Rockets({ d, b, set }: { d: Design; b: Budgets; set: Set }) {
+  const t = b.traj;
+  return (
+    <section className="panel">
+      <h3>Rocket</h3>
+      <div className="grid two">
+        {ROCKETS.map((r) => {
+          const cap = t.ok ? rocketCapacityKg(r, t.c3) : 0;
+          const fits = cap >= b.mass.wet;
+          return (
+            <button type="button" key={r.id} className="card" aria-pressed={d.rocket === r.id} onClick={() => set({ rocket: r.id })}>
+              <span className="name">{r.name} <Lamp s={!t.ok ? 'info' : fits ? 'green' : 'red'} /></span>
+              <span className="facts num"><span>{money(r.priceM)}</span><span>lifts {kg(cap)} {d.scenario === 'moon' ? 'to the Moon' : 'on these dates'}</span></span>
+              <span className="what">{r.blurb}</span>
+              <span className="row" style={{ gap: 6 }}><SrcTag src={r.src} /></span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="muted small">Your spacecraft currently weighs {kg(b.mass.wet)} fuelled. That changes with every part you add in Phase B.</p>
+    </section>
+  );
+}
+
+/** Ice Hunter has no launch chart: the choices are how low to fly and how long to stay. */
+function MoonRoute({ d, b, set }: { d: Design; b: Budgets; set: Set }) {
+  const t = b.traj;
+  const months = d.months ?? 12;
+  const ecl = MOON.eclipses.filter((e) => e.jd > d.arriveJd && e.jd < t.opsEndJd);
+  return (
+    <>
+      <Head eyebrow="Phase A · concept and technology development" title="Choose the orbit">
+        The Moon is four to five days away on any day of the year, so there is no launch window to hunt for. The choices are how low to fly and how long to stay. Lower means sharper maps, more fuel to hold the orbit, and a spacecraft that falls faster if a burn is missed.
+      </Head>
+      <section className="panel">
+        <h3>How high will you fly? <SrcTag src={MOON.src} /></h3>
+        <div className="grid">
+          {MOON_ORBITS.map((o) => {
+            const n = moonNight(o.km);
+            return (
+              <button type="button" key={o.id} className="card" aria-pressed={d.standoff === o.id} onClick={() => set({ standoff: o.id })}>
+                <span className="name">{o.name}</span>
+                <span className="facts num"><span>{Math.round(n.periodH * 60)} min a lap</span><span>{Math.round(n.nightH * 60)} min of night</span><span>{o.skMsYr} m/s a year to hold</span></span>
+                <span className="what">{o.what}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="muted small">Lap time and night follow from the size of the orbit. The fuel to hold 50 km follows Lunar Reconnaissance Orbiter. The other two rates are game values.</p>
+      </section>
+      <section className="panel">
+        <h3>How long will you map?</h3>
+        <div className="split">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="grid">
+              {[6, 12, 18].map((m) => (
+                <button type="button" key={m} className="card" aria-pressed={months === m} onClick={() => set({ months: m })}>
+                  <span className="name">{m} months</span>
+                  <span className="what">{m === 6 ? 'Quick and cheap. A neutron detector needs longer than this to build a clear signal.' : m === 12 ? 'A full year of lunar seasons, the length Lunar Reconnaissance Orbiter first planned.' : 'More time on target, if the spacecraft is ready early enough for it to count.'}</span>
+                </button>
+              ))}
+            </div>
+            <table>
+              <tbody>
+                <tr><td>Launch, two weeks after the build ends</td><td className="r num">{fmtDate(d.launchJd)}</td></tr>
+                <tr><td>In orbit around the Moon</td><td className="r num">{fmtDate(d.arriveJd)}</td></tr>
+                <tr><td>Mapping</td><td className="r num">{fmtDate(t.opsStartJd)} to {fmtDate(t.opsEndJd)}</td></tr>
+                <tr><td>Landing site chosen (game premise)</td><td className="r num">{fmtDate(MOON.deadlineJd)}</td></tr>
+                <tr><td>Capture burn</td><td className="r num">{(t.dvArrive * 1000).toFixed(0)} m/s</td></tr>
+                <tr><td>Holding the orbit</td><td className="r num">{(t.dvOps * 1000).toFixed(0)} m/s</td></tr>
+                <tr><td><Term k="dv">Delta-v after launch</Term>, with margin</td><td className="r num">{(t.dvTotal * 1000).toFixed(0)} m/s</td></tr>
+                <tr><td>Earth's shadow crosses the Moon <SrcTag src={MOON.eclipseSrc} /></td><td className="r num">{ecl.length ? ecl.map((e) => e.name).join(', ') : 'not during this mission'}</td></tr>
+                <tr><td>Radio delay</td><td className="r num">1.3 s</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}><MoonView altKm={t.rangeKm} /></div>
+        </div>
+      </section>
+      <Rockets d={d} b={b} set={set} />
+    </>
+  );
+}
+
 export function Route({ d, b, set }: { d: Design; b: Budgets; set: Set }) {
   const t = b.traj;
   const stands = d.missionType === 'rendezvous' ? STANDOFFS : FLYBY_PASSES;
@@ -220,6 +309,7 @@ export function Route({ d, b, set }: { d: Design; b: Budgets; set: Set }) {
     set({ launchJd: l, arriveJd: Math.min(LAST_ARRIVAL_JD, Math.max(l + MIN_TOF_DAYS, d.arriveJd + da)) });
   };
   const light = t.ok ? earthKmAt(d.arriveJd) / C_KM_S : 0;
+  if (d.scenario === 'moon') return <MoonRoute d={d} b={b} set={set} />;
   return (
     <>
       <Head eyebrow="Phase A · concept and technology development" title="Choose the route">
@@ -283,24 +373,7 @@ export function Route({ d, b, set }: { d: Design; b: Budgets; set: Set }) {
           ))}
         </div>
       </section>
-      <section className="panel">
-        <h3>Rocket</h3>
-        <div className="grid two">
-          {ROCKETS.map((r) => {
-            const cap = t.ok ? rocketCapacityKg(r, t.c3) : 0;
-            const fits = cap >= b.mass.wet;
-            return (
-              <button type="button" key={r.id} className="card" aria-pressed={d.rocket === r.id} onClick={() => set({ rocket: r.id })}>
-                <span className="name">{r.name} <Lamp s={!t.ok ? 'info' : fits ? 'green' : 'red'} /></span>
-                <span className="facts num"><span>{money(r.priceM)}</span><span>lifts {kg(cap)} on these dates</span></span>
-                <span className="what">{r.blurb}</span>
-                <span className="row" style={{ gap: 6 }}><SrcTag src={r.src} /></span>
-              </button>
-            );
-          })}
-        </div>
-        <p className="muted small">Your spacecraft currently weighs {kg(b.mass.wet)} fuelled. That changes with every part you add in Phase B.</p>
-      </section>
+      <Rockets d={d} b={b} set={set} />
     </>
   );
 }
@@ -392,7 +465,7 @@ export function Build({ d, b, set, ripple }: { d: Design; b: Budgets; set: Set; 
       <section className="panel">
         <h3>Instruments</h3>
         <div className="grid two">
-          {INSTRUMENTS.map((i) => (
+          {instrumentsFor(d.scenario).map((i) => (
             <button type="button" key={i.id} className="card" role="checkbox" aria-checked={d.instruments.includes(i.id)} onClick={() => toggle(i.id)}>
               <span className="name">{i.name}</span>
               <span className="facts num"><span>{i.massKg} kg</span><span>{i.powerW} W</span><span>{money(i.costM)}</span><span>{i.dataMbPerHour} Mb/h</span></span>
@@ -518,7 +591,8 @@ export function Fly({ g, res, done, call }: { g: Game; res: FlightResult; done: 
   const over = pe >= 1 && !pending;
   const shown = events.filter((e) => (over || e.jd <= jd) && (!pending || e.n < pending.n));
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [shown.length]);
-  const light = earthKmAt(Math.max(d.launchJd, Math.min(jd, APOPHIS.flybyJd + 30))) / C_KM_S;
+  const moon = d.scenario === 'moon';
+  const light = moon ? Math.min(1, Math.max(0, (jd - d.launchJd) / MOON.transitDays)) * (384400 / C_KM_S) : earthKmAt(Math.max(d.launchJd, Math.min(jd, APOPHIS.flybyJd + 30))) / C_KM_S;
   const stays = d.missionType === 'rendezvous' && !res.becameFlyby && res.launched;
   const flown = res.launched && (!pending || pending.phase !== 'launch');
   const owners = consoleOwners(g.players);
@@ -550,7 +624,9 @@ export function Fly({ g, res, done, call }: { g: Game; res: FlightResult; done: 
             <div><div className="eyebrow">Radio delay, one way</div><div className="num" style={{ fontSize: '1.2rem' }}>{jd < d.launchJd || !flown ? '—' : light >= 60 ? `${Math.floor(light / 60)} min ${Math.round(light % 60)} s` : `${light.toFixed(1)} s`}</div></div>
           </div>
           <div className="chart-wrap" style={{ display: 'flex', justifyContent: 'center' }}>
-            <OrbitView launchJd={d.launchJd} arriveJd={d.arriveJd} nowJd={flown ? jd : d.launchJd} stays={stays} size={340} />
+            {moon
+              ? <MoonView altKm={MOON_ORBITS.find((o) => o.id === d.standoff)?.km ?? 50} progress={(jd - res.arrivedJd - MOON.commissionDays) / Math.max(1, res.opsDaysPlanned)} size={340} />
+              : <OrbitView launchJd={d.launchJd} arriveJd={d.arriveJd} nowJd={flown ? jd : d.launchJd} stays={stays} size={340} />}
           </div>
           <div className="row">
             <button type="button" className="btn small" disabled={waiting} onClick={() => { if (over) setP(0); setPlaying(!playing || over); }}>{over ? 'Replay' : playing ? 'Pause' : 'Play'}</button>
@@ -593,6 +669,7 @@ export function Debrief({ g, b, res, mc, again, newLuck, reset }: { g: Game; b: 
   const score = useMemo(() => scoreFlight(res, b, g.gates, mc ? mc.success : null, g.players.length), [res, b, g.gates, mc, g.players.length]);
   const frac = res.sciencePoints / b.klass.scienceTarget;
   const headline = headlineOf(res, b.klass.scienceTarget);
+  const moon = g.design.scenario === 'moon';
   const [copied, setCopied] = useState('');
   const calls = res.decisions.filter((x) => x.byPlayer);
   const runs = g.history;
@@ -625,6 +702,13 @@ export function Debrief({ g, b, res, mc, again, newLuck, reset }: { g: Game; b: 
             ))}
           </div>
         </section>
+        {moon ? (
+          <section className="panel">
+            <h3>From orbit</h3>
+            <div style={{ display: 'flex', justifyContent: 'center' }}><MoonView altKm={b.traj.rangeKm} progress={res.opsDaysDone / Math.max(1, res.opsDaysPlanned)} size={260} /></div>
+            <p className="small">Mapped from {b.traj.rangeKm} km for {res.opsDaysDone} of {res.opsDaysPlanned} planned days.{isFinite(res.resolutionM) && <> The camera resolved <span className="num">{detail(res.resolutionM)}</span> per pixel.</>}</p>
+          </section>
+        ) : (
         <section className="panel">
           <h3>The postcard</h3>
           {res.gb.sent > 0 && isFinite(res.resolutionM) ? (
@@ -635,6 +719,7 @@ export function Debrief({ g, b, res, mc, again, newLuck, reset }: { g: Game; b: 
             </>
           ) : <p className="small muted">No pictures came home.</p>}
         </section>
+        )}
       </div>
       <section className="panel">
         <h3>Science return</h3>
@@ -696,6 +781,26 @@ export function Debrief({ g, b, res, mc, again, newLuck, reset }: { g: Game; b: 
             </>
           ) : <p className="small muted">You launched without flying this exact design 1,000 times first, so nobody knew the odds.</p>}
         </section>
+        {moon ? (
+          <section className="panel">
+            <h3>Reality check <SrcTag src={LRO_SRC} /></h3>
+            <div className="chart-wrap">
+              <table>
+                <thead><tr><th></th><th>Yours</th><th>NASA's Lunar Reconnaissance Orbiter</th></tr></thead>
+                <tbody>
+                  <tr><td>Orbit</td><td className="num">{b.traj.rangeKm} km, polar</td><td className="num">{MOON.lro.altKm} km, polar</td></tr>
+                  <tr><td>Launch mass</td><td className="num">{kg(b.mass.wet)}</td><td className="num">{MOON.lro.wetKg.toLocaleString('en-US')} kg</td></tr>
+                  <tr><td>Propellant</td><td className="num">{kg(b.mass.prop)}</td><td className="num">{MOON.lro.fuelKg} kg</td></tr>
+                  <tr><td>Delta-v</td><td className="num">{(b.dv.needed * 1000).toFixed(0)} m/s</td><td className="num">{MOON.lro.dvMs.toLocaleString('en-US')} m/s</td></tr>
+                  <tr><td>Power</td><td className="num">{Math.round(b.power.worst)} W</td><td className="num">{MOON.lro.powerW} W</td></tr>
+                  <tr><td>Data a day <SrcTag src={LRO_DATA_SRC} /></td><td className="num">{b.data.genGbDay.toFixed(1)} Gb</td><td className="num">{MOON.lro.gbPerDay} Gb</td></tr>
+                  <tr><td>Planned mapping</td><td className="num">{d.months ?? 12} months</td><td className="num">12 months, then extended</td></tr>
+                  <tr><td>Cost</td><td className="num">{money(res.finalCostM)}</td><td className="num">about $500M</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : (
         <section className="panel">
           <h3>Reality check <SrcTag src={RAMSES_SRC} /></h3>
           <div className="chart-wrap">
@@ -712,6 +817,7 @@ export function Debrief({ g, b, res, mc, again, newLuck, reset }: { g: Game; b: 
             </table>
           </div>
         </section>
+        )}
       </div>
       <section className="panel">
         <h3>Try again</h3>

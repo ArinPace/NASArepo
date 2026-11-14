@@ -1,7 +1,7 @@
 // "How real is this?" The same comparisons the test suite makes, run live in
 // the player's browser so anyone can see the model against published values.
-import { AU_KM, MU_EARTH, dateFromJd, earthDistanceKm, earthState, jdFromDate, lambert, norm, transferTo } from './astro';
-import { APOPHIS, ARRAY, RAMSES_SRC, ROCKETS, Src, rocketCapacityKg } from './data';
+import { AU_KM, G0, MU_EARTH, MU_MOON, R_MOON, circularSpeed, dateFromJd, earthDistanceKm, earthState, jdFromDate, lambert, norm, orbitPeriodS, transferTo } from './astro';
+import { APOPHIS, ARRAY, LRO_DATA_SRC, LRO_SRC, MOON, PROPS, RAMSES_SRC, ROCKETS, Src, rocketCapacityKg } from './data';
 import { dataRateKbps } from './design';
 
 export interface Check {
@@ -108,6 +108,37 @@ export function runChecks(): Check[] {
     src: { label: 'NASA descriptions of Mars Reconnaissance Orbiter telecommunications', kind: 'nasa' },
     ok: far > 300 && far < 3000 && near >= 4000,
     note: 'The game caps the rate at what the transmitter can handle.',
+  });
+
+  // 8 to 10. The Moon, against Lunar Reconnaissance Orbiter
+  const lro = MOON.lro;
+  const lapMin = orbitPeriodS(MU_MOON, R_MOON + lro.altKm) / 60;
+  const speed = circularSpeed(MU_MOON, R_MOON + lro.altKm);
+  out.push({
+    what: 'One lap of the Moon at 50 km',
+    ours: `${lapMin.toFixed(0)} minutes at ${speed.toFixed(2)} km/s`,
+    published: `about ${lro.periodMin} minutes at ${lro.speedKmS} km/s`,
+    src: LRO_DATA_SRC,
+    ok: Math.abs(lapMin - lro.periodMin) < 2 && Math.abs(speed - lro.speedKmS) < 0.1,
+  });
+  const mono = PROPS.find((p) => p.id === 'mono')!;
+  const dv = mono.ispS * G0 * Math.log(lro.wetKg / lro.dryKg);
+  out.push({
+    what: 'Rocket equation with LRO\'s published masses',
+    ours: `${Math.round(dv).toLocaleString('en-US')} m/s from ${lro.fuelKg} kg of propellant`,
+    published: `${lro.dvMs.toLocaleString('en-US')} m/s`,
+    src: LRO_SRC,
+    ok: Math.abs(dv - lro.dvMs) / lro.dvMs < 0.15,
+    note: `The game's single-propellant engine is a textbook ${mono.ispS} s, and it burns every kilogram. Real tanks keep some back.`,
+  });
+  const cam = 10e-6 * lro.altKm * 1000;
+  out.push({
+    what: 'Mapping camera detail from 50 km',
+    ours: `${Math.round(cam * 100)} cm per pixel`,
+    published: `${Math.round(lro.camResM * 100)} cm per pixel`,
+    src: MOON.src,
+    ok: Math.abs(cam - lro.camResM) < 0.05,
+    note: 'The camera in the game is set to the pixel size that gives this figure. The check guards against it drifting.',
   });
   return out;
 }

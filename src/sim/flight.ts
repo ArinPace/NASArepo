@@ -1,9 +1,10 @@
 // Flight simulation. One seed = one possible world. The same seed always
 // produces the same hardware luck, so changing the design and flying again
 // shows exactly what that change bought.
-import { APOPHIS, ARRAY, DSN, FLYBY_PASSES, INSTRUMENTS, Instrument, OBJECTIVES, REDUNDANCY, STANDOFFS, rocketCapacityKg, ANTENNAS, RADIOS, ADCS, STORAGES } from './data';
+import { APOPHIS, ARRAY, DSN, FLYBY_PASSES, Instrument, instrumentsFor, OBJECTIVES, REDUNDANCY, STANDOFFS, rocketCapacityKg, ANTENNAS, RADIOS, ADCS, STORAGES } from './data';
 import { Budgets, ConsoleId, Design, LAST_ARRIVAL_JD, SCIENCE_HOURS_PER_DAY, dataRateKbps, earthKmAt, evaluate, sunAuAt, trajectory } from './design';
 import { fmtDate, transferTo } from './astro';
+import { moonEmpty, moonNight, moonOps } from './moon';
 
 /** Deterministic number in [0, 1) from a seed and a label. */
 export function draw(seed: number, key: string): number {
@@ -100,6 +101,7 @@ function imagingQuality(resM: number): number {
 export function simulate(d0: Design, seed: number, b0?: Budgets, calls: Calls = {}): FlightResult {
   let d = d0;
   let b = b0 ?? evaluate(d);
+  const moon = d.scenario === 'moon'; // Ice Hunter shares the build, launch and capture, then flies its own mapping phase
   const ev: FlightEvent[] = [];
   const causes: Cause[] = [];
   const decisions: Decision[] = [];
@@ -142,7 +144,7 @@ export function simulate(d0: Design, seed: number, b0?: Budgets, calls: Calls = 
   };
 
   // ---- state that failures change
-  let active = INSTRUMENTS.filter((i) => d.instruments.includes(i.id));
+  let active = instrumentsFor(d.scenario).filter((i) => d.instruments.includes(i.id));
   const quality: Record<string, number> = {};
   for (const i of active) quality[i.id] = 1;
   let powerFactor = 1, gainLossDb = 0, rateFactorDays = 0, pointingDegraded = false, storageFactor = 1;
@@ -167,6 +169,10 @@ export function simulate(d0: Design, seed: number, b0?: Budgets, calls: Calls = 
   };
 
   function scoreObjectives() {
+    if (moon) {
+      if (!res.objectives.length) moonEmpty(d, res);
+      return;
+    }
     const adcs = find(ADCS, d.adcs);
     const sentShare = wantedGb > 0 ? clamp01(((triage ? 1.3 : 1) * res.gb.sent) / wantedGb) : 0;
     const has_ = (id: string) => active.some((i) => i.id === id);
@@ -262,8 +268,8 @@ export function simulate(d0: Design, seed: number, b0?: Budgets, calls: Calls = 
 
   // ================= launch =================
   let launchJd = d.launchJd;
-  if (!b.traj.ok || b.mass.margin < 0 || !b.mass.feasible || b.time.slackDays < 0) {
-    lose(launchJd, 'launch', 'Never left the ground', !b.traj.ok ? 'There was no valid trajectory.' : b.time.slackDays < 0 ? 'The spacecraft was not finished when the launch window closed.' : 'The spacecraft was too heavy for its rocket.');
+  if (!b.traj.ok || b.mass.margin < 0 || !b.mass.feasible || (!moon && b.time.slackDays < 0)) {
+    lose(launchJd, 'launch', 'Never left the ground', !b.traj.ok ? 'There was no valid trajectory.' : !moon && b.time.slackDays < 0 ? 'The spacecraft was not finished when the launch window closed.' : 'The spacecraft was too heavy for its rocket.');
     causes.push({ good: false, decision: 'The team voted GO with a red finding still open.', effect: 'The mission could not launch.' });
     return finish();
   }
@@ -304,7 +310,15 @@ export function simulate(d0: Design, seed: number, b0?: Budgets, calls: Calls = 
       causes.push({ good: true, decision: 'Mass and propellant margins were kept in hand.', effect: `A ${slip}-day launch slip was absorbed.` });
     }
   };
-  if (b.rocket.shared && r('share-slip') < 0.3) {
+  if (moon && b.rocket.shared && r('share-slip') < 0.3) {
+    // The Moon is there every month: a late ride costs mapping time, not the mission.
+    const slip = Math.round(20 + 40 * r('share-days'));
+    launchJd += slip;
+    d = { ...d, launchJd, arriveJd: d.arriveJd + slip };
+    say(launchJd, 'launch', 'warn', `Launch slipped ${slip} days`, 'The main passenger was late. Mapping starts that much closer to the decision date.');
+    causes.push({ good: false, decision: 'A shared ride leaves when the main passenger is ready.', effect: `The launch slipped ${slip} days.` });
+  }
+  if (!moon && b.rocket.shared && r('share-slip') < 0.3) {
     const slip = Math.round(20 + 40 * r('share-days'));
     const fix = replan(slip);
     if (!fix) {
@@ -314,7 +328,7 @@ export function simulate(d0: Design, seed: number, b0?: Budgets, calls: Calls = 
     }
     applySlip(slip, fix, 'The main passenger was late.', 'A shared ride, with propellant sized for the original dates only.');
   }
-  if (!b.rocket.shared && r('wx') < 0.35) {
+  if (!moon && !b.rocket.shared && r('wx') < 0.35) {
     // Launch-day weather: the first call the team makes for real.
     const fix = replan(3);
     const stops = d.missionType !== 'flyby';
@@ -347,7 +361,7 @@ export function simulate(d0: Design, seed: number, b0?: Budgets, calls: Calls = 
     return finish();
   }
   res.launched = true;
-  say(launchJd, 'launch', 'good', 'Liftoff', `${b.rocket.name} threw ${Math.round(b.mass.wet)} kg toward Apophis with a launch energy of ${b.traj.c3.toFixed(1)} km²/s².`);
+  say(launchJd, 'launch', 'good', 'Liftoff', `${b.rocket.name} threw ${Math.round(b.mass.wet)} kg toward ${moon ? 'the Moon' : 'Apophis'} with a launch energy of ${b.traj.c3.toFixed(1)} km²/s².`);
 
   // ================= cruise =================
   const tof = d.arriveJd - launchJd;
@@ -366,7 +380,7 @@ export function simulate(d0: Design, seed: number, b0?: Budgets, calls: Calls = 
   }
   let arrivalDelay = 0;
   if (roll('sw', 0.12 * cm, 0.12 * cm * (has('e2e') ? 0.35 : 1), 'The flight software was never run end to end on the real hardware.', 'The test-as-you-fly campaign found a command that would have rebooted the computer.', 'A software fault put the spacecraft in safe mode.')) {
-    const near = r('sw-when') > 0.8;
+    const near = !moon && r('sw-when') > 0.8; // a lunar transfer is too short for a late surprise
     say(launchJd + tof * (near ? 0.93 : 0.5), 'cruise', 'warn', 'Safe mode', near ? 'A fault days before arrival forced a rushed re-plan. Arrival slips 8 days.' : 'The spacecraft shut down non-essentials and called home. The team recovered it in 9 days.');
     if (near) arrivalDelay += 8;
   }
@@ -390,23 +404,39 @@ export function simulate(d0: Design, seed: number, b0?: Budgets, calls: Calls = 
   const redRisk = d.redundancy === 'single' ? 1 : d.redundancy === 'selective' ? 0.7 : 0.4;
   const adcs = find(ADCS, d.adcs);
   let arriveJd = d.arriveJd + arrivalDelay;
+  let moonDvPenalty = 0;
   if (d.missionType === 'rendezvous' && !res.becameFlyby) {
     const base = 0.07 * cm;
     const actual = base * (has('fire') ? 0.4 : 1) * (has('ops') ? 0.6 : 1) * redRisk;
     const missing = !has('fire') ? 'The engine was never hot-fired on the ground.' : !has('ops') ? 'The arrival was never rehearsed.' : '';
     if (roll('burn', base, actual, missing, has('fire') ? 'The hot-fire test found a slow valve, replaced before launch.' : 'Rehearsals caught a wrong burn direction in the plan.', 'The braking burn cut off early.')) {
-      if (d.redundancy !== 'single' || r('burn-luck') < 0.3) {
+      if (moon && (d.redundancy !== 'single' || r('burn-luck') < 0.3)) {
+        moonDvPenalty = 0.04;
+        say(arriveJd, 'arrival', 'warn', 'Capture burn ran rough', `${d.redundancy !== 'single' ? 'A valve stuck and the backup string took over within seconds.' : 'A valve stuck, then freed itself.'} Trimming the lopsided orbit cost 40 m/s of propellant.`);
+      } else if (d.redundancy !== 'single' || r('burn-luck') < 0.3) {
         arriveJd += 9;
         say(arriveJd - 9, 'arrival', 'warn', 'Braking burn cut short', d.redundancy !== 'single' ? 'A valve stuck. The backup string finished the burn 9 days later.' : 'A valve stuck, then freed itself. A second attempt 9 days later worked.');
       } else {
+        if (moon) {
+          lose(arriveJd, 'arrival', 'Missed the Moon', 'The engine quit partway through the capture burn with no backup. The spacecraft swung past the Moon and out of reach.');
+          causes.push({ good: false, decision: 'Single-string propulsion on a mission that must brake to succeed.', effect: 'One stuck valve cost the whole mission at the capture burn.' });
+          return finish();
+        }
         res.becameFlyby = true;
         say(arriveJd, 'arrival', 'bad', 'Could not stop', `The engine quit mid-burn with no backup. The spacecraft sails past Apophis at ${b.traj.vinfArr.toFixed(1)} km/s.`);
         causes.push({ good: false, decision: 'Single-string propulsion on a mission that must brake to succeed.', effect: 'One stuck valve turned a rendezvous into a flyby.' });
       }
     }
-    if (!res.becameFlyby) say(arriveJd, 'arrival', 'good', 'Arrived at Apophis', `Speed matched after a ${(b.traj.dvArrive * 1000).toFixed(0)} m/s burn. The asteroid is a tumbling dot ${Math.round(standKm)} km away.`);
+    if (moon) {
+      const night = moonNight(b.traj.rangeKm);
+      say(arriveJd, 'arrival', 'good', 'In orbit around the Moon', `Captured with a ${(b.traj.dvArrive * 1000).toFixed(0)} m/s burn into a polar orbit ${Math.round(b.traj.rangeKm)} km up. Each lap takes ${Math.round(night.periodH * 60)} minutes, ${Math.round(night.nightH * 60)} of them in the Moon's shadow.`);
+    } else if (!res.becameFlyby) say(arriveJd, 'arrival', 'good', 'Arrived at Apophis', `Speed matched after a ${(b.traj.dvArrive * 1000).toFixed(0)} m/s burn. The asteroid is a tumbling dot ${Math.round(standKm)} km away.`);
   }
   res.arrivedJd = arriveJd;
+  if (moon) {
+    moonOps({ d, b, res, causes, cm, arriveJd, active, quality, powerFactor, gainLossDb, rateFactorDays, storageFactor, dvPenalty: moonDvPenalty, r, has, say, ask, roll, lose });
+    return res;
+  }
   const radio = find(RADIOS, d.radio), antenna = find(ANTENNAS, d.antenna), storage = find(STORAGES, d.storage);
   const busW = b.power.science - active.reduce((s, i) => s + i.powerW, 0) - 0; // science load without instruments (approx.)
   const payloadW = Math.max(1, active.reduce((s, i) => s + i.powerW, 0));

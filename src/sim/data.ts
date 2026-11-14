@@ -59,6 +59,11 @@ export const BRIEFS: Brief[] = [
     twist: 'Only fast routes remain. Get anything there and bring home what you can.',
   },
   {
+    id: 'moon', name: 'Ice Hunter', tag: 'A different world', startJd: jdFromDate(2026, 12, 1), targetMult: 1.1, capMult: 1, ranked: true, klass: 'explorer',
+    blurb: 'Map the ice hidden in craters at the Moon\'s south pole that have not seen sunlight in perhaps billions of years. No launch window to chase this time.',
+    twist: 'The fight is with fuel, batteries and the Moon\'s long nights. Lower orbits see more and cost more to hold.',
+  },
+  {
     id: 'sandbox', name: 'Sandbox', tag: 'No limits', startJd: jdFromDate(2025, 1, 1), targetMult: 1, capMult: 20, ranked: false, klass: 'flagship',
     blurb: 'Money and build time are no object: the cost cap is 20 times higher and the hardware is always ready. The physics does not bend.',
     twist: 'For trying ideas. Flights here stay off the best-flights board.',
@@ -176,6 +181,7 @@ export interface Instrument {
   dataMbPerHour: number;
   ifovUrad?: number; // angular size of one pixel, microradians
   needsPointing?: boolean;
+  world?: 'moon'; // flies only in the lunar mission
   src: Src;
 }
 export const INSTRUMENTS: Instrument[] = [
@@ -389,4 +395,83 @@ export const GLOSSARY: Record<string, { cadet: string; engineer: string; chief: 
     engineer: 'Arrival speed relative to the target (v-infinity). A rendezvous must cancel it with the engine; a flyby keeps it.',
     chief: 'v∞,arr = |v_transfer − v_target| from the Lambert solution. For a small body the capture burn is v∞ itself.',
   },
+};
+
+// ---------------------------------------------------------------- Ice Hunter: the Moon
+// Instrument masses and powers are the published figures for the Lunar
+// Reconnaissance Orbiter payload. Costs and data rates are game values.
+export const LRO_SRC: Src = { label: 'NASA Lunar Reconnaissance Orbiter launch press kit, as reprinted by Spaceflight Now', url: 'https://spaceflightnow.com/atlas/av020/090610lro.html', kind: 'nasa' };
+export const LRO_ORBIT_SRC: Src = { label: 'Vondrak and others, LRO mission overview, NASA Technical Reports Server', url: 'https://ntrs.nasa.gov/api/citations/20140000908/downloads/20140000908.pdf', kind: 'nasa' };
+export const LRO_DATA_SRC: Src = { label: 'eoPortal, Lunar Reconnaissance Orbiter', url: 'https://eoportal.org/satellite-missions/lro', kind: 'public' };
+export const ECLIPSE_SRC: Src = { label: 'Eclipse predictions by Fred Espenak, NASA GSFC', url: 'https://eclipse.gsfc.nasa.gov/LEdecade/LEdecade2021.html', kind: 'nasa' };
+
+INSTRUMENTS.push(
+  {
+    id: 'lend', name: 'Neutron detector', short: 'Neutron detector', world: 'moon',
+    what: 'Counts neutrons leaking out of the soil. Fewer neutrons means hydrogen, and hydrogen means water ice. Sees patches 10 km wide from 50 km up, and needs months of counting.',
+    massKg: 25.8, powerW: 11.6, costM: 14, trl: 9, dataMbPerHour: 2, src: LRO_SRC,
+  },
+  {
+    id: 'mns', name: 'Compact neutron counter', short: 'Compact counter', world: 'moon',
+    what: 'A shoebox-sized neutron counter for small spacecraft. It finds hydrogen, with a fainter signal and a blurrier map than the full detector.',
+    massKg: 4, powerW: 10, costM: 5, trl: 8, dataMbPerHour: 1,
+    src: game('Game values, modelled on the miniature neutron spectrometer flown on NASA\'s LunaH-Map CubeSat.'),
+  },
+  {
+    id: 'lola', name: 'Laser altimeter', short: 'Laser altimeter', world: 'moon',
+    what: 'Fires laser pulses at the ground and times the echo. Maps slopes and the floors of craters that never see the Sun.',
+    massKg: 11.3, powerW: 33.4, costM: 13, trl: 9, dataMbPerHour: 150, src: LRO_SRC,
+  },
+  {
+    id: 'diviner', name: 'Thermal radiometer', short: 'Radiometer', world: 'moon',
+    what: 'Takes the temperature of the ground, day and night. Ice lasts only where it stays colder than about minus 160 °C.',
+    massKg: 11.0, powerW: 24.7, costM: 10, trl: 9, dataMbPerHour: 80, src: LRO_SRC,
+  },
+  {
+    id: 'minirf', name: 'Imaging radar', short: 'Radar', world: 'moon',
+    what: 'Lights the ground with its own radio beam, so it sees into permanent shadow and a little way under the surface.',
+    massKg: 13.8, powerW: 7.0, costM: 12, trl: 9, dataMbPerHour: 2000, src: LRO_SRC,
+  },
+  {
+    id: 'lroc', name: 'Mapping camera', short: 'Mapping camera', world: 'moon',
+    what: 'Sharp pictures of sunlit ground: 50 cm per pixel from 50 km. Finds the boulders at a landing site. Makes a flood of data.',
+    massKg: 19.2, powerW: 24.0, costM: 20, trl: 9, dataMbPerHour: 6000, ifovUrad: 10, src: LRO_SRC,
+  },
+);
+export const instrumentsFor = (scenario: string): Instrument[] => INSTRUMENTS.filter((i) => (scenario === 'moon' ? i.world === 'moon' : !i.world));
+
+export const MOON_OBJECTIVES: Objective[] = [
+  { id: 'ice', name: 'Find the hydrogen', question: 'Where is hydrogen buried at the south pole, and how much?', needs: 'A neutron detector and many months of counting', weight: 30, instruments: ['lend', 'mns'], segments: [] },
+  { id: 'cold', name: 'Map the cold traps', question: 'Which crater floors stay cold enough to keep ice for billions of years?', needs: 'The thermal radiometer through most of a year of seasons', weight: 20, instruments: ['diviner'], segments: [] },
+  { id: 'dark', name: 'Chart the dark craters', question: 'What is the shape of the ground where sunlight never reaches?', needs: 'The laser altimeter, or the radar for a rougher answer', weight: 20, instruments: ['lola', 'minirf'], segments: [] },
+  { id: 'under', name: 'Look under the surface', question: 'Is there ice mixed into the top metre of soil?', needs: 'The imaging radar', weight: 15, instruments: ['minirf'], segments: [] },
+  { id: 'site', name: 'Certify a landing site', question: 'Is there a flat, boulder-free place to land next to the ice?', needs: 'The mapping camera. The laser altimeter adds slopes', weight: 15, instruments: ['lroc'], segments: [] },
+];
+export const objectivesFor = (scenario: string): Objective[] => (scenario === 'moon' ? MOON_OBJECTIVES : OBJECTIVES);
+
+export interface MoonOrbit extends Standoff { skMsYr: number }
+// The 50 km case follows LRO, which held that orbit with monthly burns from a
+// 1,263 m/s propellant budget. The other two rates are game values: lumps in
+// the Moon's gravity pull low orbits out of shape faster.
+export const MOON_ORBITS: MoonOrbit[] = [
+  { id: 'far', name: '100 km orbit', km: 100, dvKmS: 0, risk: 0.003, skMsYr: 40, what: 'Stable and cheap to hold. Every instrument sees a patch twice as wide as from 50 km.' },
+  { id: 'mid', name: '50 km orbit', km: 50, dvKmS: 0, risk: 0.01, skMsYr: 150, what: 'Where Lunar Reconnaissance Orbiter mapped. Needs a correcting burn every month.' },
+  { id: 'close', name: '30 km orbit', km: 30, dvKmS: 0, risk: 0.03, skMsYr: 400, what: 'The sharpest view. The Moon\'s lumpy gravity drags the orbit down, so it burns fuel fast.' },
+];
+export const MOON = {
+  src: LRO_ORBIT_SRC,
+  transitDays: 5, // LRO flew a four to five day minimum-energy transfer
+  commissionDays: 30, // check-out before mapping starts (game value)
+  deadlineJd: jdFromDate(2029, 7, 1), // game premise: the landing site is chosen on this date
+  earthKmMin: 363300, earthKmMax: 405500, // the Moon's distance at perigee and apogee
+  // Total lunar eclipses: Earth's shadow covers the Moon, and a spacecraft
+  // there loses the Sun. Hours are the umbral phase from the NASA tables.
+  eclipses: [
+    { id: 'e2812', name: '31 December 2028', jd: jdFromDate(2028, 12, 31) + 16.89 / 24, hours: 3.48 },
+    { id: 'e2906', name: '26 June 2029', jd: jdFromDate(2029, 6, 26) + 3.39 / 24, hours: 3.67 },
+    { id: 'e2912', name: '20 December 2029', jd: jdFromDate(2029, 12, 20) + 22.72 / 24, hours: 3.55 },
+  ],
+  eclipseSrc: ECLIPSE_SRC,
+  // Published LRO figures, for the debrief comparison and the checks
+  lro: { wetKg: 1916, dryKg: 1018, fuelKg: 898, dvMs: 1263, powerW: 685, altKm: 50, periodMin: 113, speedKmS: 1.6, costM: 500, gbPerDay: 572, camResM: 0.5, neutronKm: 10 },
 };

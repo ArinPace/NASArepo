@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ROCKETS, rocketCapacityKg, ARRAY } from '../src/sim/data';
-import { dataRateKbps, defaultDesign, evaluate, Design } from '../src/sim/design';
+import { dataRateKbps, defaultDesign, evaluate, Design, normalise, moonTrajectory } from '../src/sim/design';
+import { moonNight } from '../src/sim/moon';
+import { MOON } from '../src/sim/data';
 import { simulate, monteCarlo, scoreFlight, Decision, FlightResult } from '../src/sim/flight';
 import { AU_KM, jdFromDate } from '../src/sim/astro';
 
@@ -58,7 +60,9 @@ test('in-flight calls: the past never changes when the team makes a different ca
   const flyby: Design = { ...defaultDesign('smallsat'), missionType: 'flyby', rocket: 'small', launchJd: jdFromDate(2028, 12, 1), arriveJd: jdFromDate(2029, 4, 9) };
   const seen = new Map<string, number>();
   let checked = 0;
-  for (const d of [base, flyby]) {
+  const moon: Design = normalise({ ...defaultDesign('explorer', 'moon'), objectives: ['ice', 'cold', 'site'], instruments: ['lend', 'diviner', 'lroc'], standoff: 'mid', months: 12, battery: 'b2' });
+  const moonThin: Design = normalise({ ...defaultDesign('explorer', 'moon'), objectives: ['ice'], instruments: ['lend', 'diviner'], standoff: 'close', months: 12, battery: 'b1' });
+  for (const d of [base, flyby, moon, moonThin]) {
     for (let seed = 1; seed <= 150; seed++) {
       const calls: Record<string, string> = {};
       for (let step = 0; step < 8; step++) {
@@ -81,7 +85,7 @@ test('in-flight calls: the past never changes when the team makes a different ca
     }
   }
   console.log(`  ${checked} alternative calls checked. Calls met: ${[...seen.entries()].map(([k, v]) => `${k} ${v}`).join(', ')}`);
-  for (const id of ['wx', 'watch', 'storm', 'recorder', 'mosaic']) assert.ok((seen.get(id) ?? 0) > 0, `${id} never came up`);
+  for (const id of ['wx', 'watch', 'storm', 'recorder', 'mosaic', 'ecl-e2812', 'low']) assert.ok((seen.get(id) ?? 0) > 0, `${id} never came up`);
 });
 
 test('in-flight calls: launching through marginal winds loses about one flight in eight; holding loses none to wind', () => {
@@ -104,7 +108,7 @@ test('the live validation panel agrees with the published values', async () => {
   const { runChecks } = await import('../src/sim/checks');
   const checks = runChecks();
   for (const c of checks) console.log(`  ${c.ok ? 'ok ' : 'BAD'} ${c.what}: ${c.ours} (published: ${c.published})`);
-  assert.ok(checks.length >= 7);
+  assert.ok(checks.length >= 10);
   assert.ok(checks.every((c) => c.ok));
 });
 
@@ -117,4 +121,44 @@ test('Last call: with 16 months, no rendezvous is possible and a fast flyby stil
   console.log(`  default Last call flyby: launch energy ${b.traj.c3.toFixed(1)} km2/s2, arrival ${b.traj.vinfArr.toFixed(1)} km/s, slack ${Math.round(b.time.slackDays)} days, findings: ${b.findings.map((f) => f.id).join(', ') || 'none'}`);
   const stop = evaluate({ ...d, missionType: 'rendezvous' });
   assert.ok(!stop.mass.feasible || stop.mass.margin < 0 || stop.findings.some((f) => f.level === 'red'), 'stopping at Apophis from a late launch should not close');
+});
+
+test('Ice Hunter: the trip and the orbit match Lunar Reconnaissance Orbiter', () => {
+  const d = normalise({ ...defaultDesign('explorer', 'moon'), standoff: 'mid', months: 12 });
+  const t = moonTrajectory(d);
+  const night = moonNight(50);
+  console.log(`  launch energy ${t.c3.toFixed(2)} km2/s2, arrival speed ${t.vinfArr.toFixed(2)} km/s, capture ${(t.dvArrive * 1000).toFixed(0)} m/s, lap ${(night.periodH * 60).toFixed(0)} min, night ${(night.nightH * 60).toFixed(0)} min`);
+  assert.ok(t.c3 > -2.5 && t.c3 < -1.5, 'a lunar transfer is just short of escape');
+  assert.ok(t.dvArrive > 0.75 && t.dvArrive < 0.95, 'capture into a 50 km orbit takes 800 to 900 m/s');
+  assert.ok(Math.abs(night.periodH * 60 - 113) < 2, 'LRO laps the Moon in about 113 minutes');
+  assert.ok(Math.abs(night.nightH * 60 - 48) < 3, 'up to 48 minutes of each lap is in shadow');
+  // capture plus a year at 50 km must fit inside LRO's published 1,263 m/s
+  assert.ok((t.dvArrive + t.dvOps) * 1000 < MOON.lro.dvMs, `${((t.dvArrive + t.dvOps) * 1000).toFixed(0)} m/s`);
+  assert.ok(moonTrajectory({ ...d, standoff: 'close' }).dvTotal > t.dvTotal && moonTrajectory({ ...d, standoff: 'far' }).dvTotal < t.dvTotal, 'lower orbits cost more to hold');
+});
+
+test('Ice Hunter: batteries, the deadline and the odds behave', () => {
+  const lean = defaultDesign('explorer', 'moon');
+  assert.ok(evaluate(lean).findings.some((f) => f.id === 'battery' && f.level === 'red'), 'the small battery cannot carry an Explorer through the night');
+  const good: Design = normalise({ ...lean, objectives: ['ice', 'cold', 'dark'], instruments: ['lend', 'diviner', 'lola'], standoff: 'mid', months: 12, battery: 'b2', tests: ['e2e', 'fire'], reservePct: 15, redundancy: 'selective' });
+  const b = evaluate(good);
+  assert.deepEqual(b.findings.filter((f) => f.level === 'red').map((f) => f.id), []);
+  const late = evaluate(normalise({ ...good, klass: 'flagship', rocket: 'f9', months: 18, battery: 'b3' }));
+  assert.ok(late.findings.some((f) => f.id === 'm-late'), 'a Flagship cannot map for 18 months before the decision date');
+  const mc = monteCarlo(good, 1000);
+  const mcLean = monteCarlo(lean, 400);
+  console.log(`  LRO-like Explorer: mass ${Math.round(b.mass.wet)} kg, power ${Math.round(b.power.worst)} W, cost $${Math.round(b.cost.total)}M, ${Math.round(b.time.slackDays)} days spare; 1,000 flights: ${(mc.success * 100).toFixed(0)}% succeed, ${(mc.survive * 100).toFixed(0)}% survive, mean science ${mc.meanScience.toFixed(1)} of ${b.klass.scienceTarget}`);
+  assert.ok(mc.success > 0.7 && mc.success < 0.99);
+  assert.ok(mcLean.success < 0.05, 'one instrument and six months is not enough science');
+  // the eclipse call: a big battery can observe through Earth's shadow, a small one cannot
+  let froze = 0, sawEclipse = 0, bonus = 0;
+  for (let seed = 1; seed <= 300; seed++) {
+    const small = simulate(normalise({ ...good, battery: 'b1' }), seed, undefined, { 'ecl-e2812': 'on' });
+    if (small.decisions.some((x) => x.id === 'ecl-e2812')) { sawEclipse++; if (small.lostWhy.includes('Froze')) froze++; }
+    const big = simulate(normalise({ ...good, battery: 'b3' }), seed, undefined, { 'ecl-e2812': 'on' });
+    assert.ok(!big.lostWhy.includes('Froze'));
+    if (big.events.some((e) => e.title === 'Mapped through the eclipse')) bonus++;
+  }
+  console.log(`  eclipse of 31 Dec 2028 met in ${sawEclipse} of 300 worlds; small battery kept on froze ${froze}; large battery mapped through it ${bonus} times`);
+  assert.ok(sawEclipse > 250 && froze > 0.4 * sawEclipse && bonus > 250);
 });

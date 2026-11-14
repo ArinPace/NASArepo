@@ -1,5 +1,5 @@
 import { ReactNode, useState, createContext, useContext } from 'react';
-import { ADCS, ANTENNAS, BATTERIES, BRIEFS, CLASSES, FLYBY_PASSES, GLOSSARY, INSTRUMENTS, OBJECTIVES, PROPS, RADIOS, REDUNDANCY, ROCKETS, STANDOFFS, STORAGES, Src, TESTS, briefOf } from '../sim/data';
+import { ADCS, ANTENNAS, BATTERIES, BRIEFS, CLASSES, FLYBY_PASSES, GLOSSARY, INSTRUMENTS, MOON, MOON_OBJECTIVES, MOON_ORBITS, OBJECTIVES, PROPS, RADIOS, REDUNDANCY, ROCKETS, STANDOFFS, STORAGES, Src, TESTS, briefOf } from '../sim/data';
 import { fmtDate } from '../sim/astro';
 import { Budgets, CONSOLES, ConsoleId, Design, Finding, defaultDesign } from '../sim/design';
 import { Calls, FlightResult, GateRecord, McResult } from '../sim/flight';
@@ -130,6 +130,7 @@ export function Rail({ b, d }: { b: Budgets; d: Design }) {
   const chief = depth === 'chief', cadet = depth === 'cadet';
   const m = b.mass, p = b.power, c = b.cost, t = b.time, da = b.data;
   const dataOk = da.genGbDay <= da.downGbDayWorst * 1.02 || da.fillDays >= 5;
+  const moon = d.scenario === 'moon';
   return (
     <aside className="rail" aria-label="Mission budgets">
       <div className="panel">
@@ -143,16 +144,22 @@ export function Rail({ b, d }: { b: Budgets; d: Design }) {
           explain={cadet ? 'What the spacecraft uses against what its solar panels make at the farthest point from the Sun.' : <>Science mode {Math.round(p.science)} W, downlink mode {Math.round(p.comm)} W, safe mode {Math.round(p.safe)} W. Panels sized at {b.traj.sunAuMax.toFixed(2)} au.{chief && ' P = 270 W/m² × area ÷ distance² × 0.92.'}</>} />
         <Meter label="Data" value={`${da.genGbDay.toFixed(1)} / ${da.downGbDayWorst.toFixed(1)} Gb/day`} fill={da.genGbDay / Math.max(0.01, da.downGbDayWorst)}
           status={st(dataOk, da.genGbDay > da.downGbDayWorst * 1.02)} detail={`${rate(da.kbpsWorst)} at worst, ${rate(da.kbpsBest)} at best`}
-          explain={cadet ? 'What the instruments record each day against what the radio can send home.' : <>Earth is {(da.earthKmMax / 149597870.7).toFixed(2)} au away at the farthest point of operations. Recorder holds {da.storageGb} Gb.{chief && ' Rate = EIRP + G/T − path loss + 228.6 − 6 dB.'}</>} />
+          explain={cadet ? 'What the instruments record each day against what the radio can send home.' : <>Earth is {moon ? `${Math.round(da.earthKmMax).toLocaleString('en-US')} km` : `${(da.earthKmMax / 149597870.7).toFixed(2)} au`} away at the farthest point of operations. Recorder holds {da.storageGb} Gb.{chief && ' Rate = EIRP + G/T − path loss + 228.6 − 6 dB.'}</>} />
         <Meter label="Budget" value={`${money(c.total)} / ${money(c.cap)}`} fill={c.total / c.cap}
           status={st(c.margin >= 0, d.reservePct < 15)} detail={`${d.reservePct}% reserve inside the total`}
           explain={<>Hardware {money(c.hardware)}, management and integration {money(c.wraps)}, rocket {money(c.launch)}, operations {money(c.ops)}, tests {money(c.tests)}, network time {money(c.dsn)}, reserve {money(c.reserve)}.</>} />
-        <Meter label="Time" value={b.traj.ok ? `${Math.round(t.slackDays)} days slack` : 'no route'} fill={b.traj.ok ? Math.min(1, t.devMonths * 30.44 / Math.max(1, t.devMonths * 30.44 + t.slackDays)) : 1}
-          status={st(!b.traj.ok || t.slackDays >= 0, t.slackDays < 30)} detail={`${t.devMonths.toFixed(1)} months to build, ${t.missionMonths.toFixed(0)} months to fly`}
-          explain={`Time to design, build and test, counted from ${fmtDate(briefOf(d.scenario).startJd)}, against your launch date. Apophis will not wait.`} />
+        {moon ? (
+          <Meter label="Time" value={t.slackDays >= 0 ? `${Math.round(t.slackDays)} days spare` : `${Math.round(-t.slackDays)} days too late`} fill={Math.min(1, (b.traj.opsEndJd - briefOf(d.scenario).startJd) / (MOON.deadlineJd - briefOf(d.scenario).startJd))}
+            status={st(!b.findings.some((f) => f.id === 'm-late' && f.level === 'red'), t.slackDays < 0)} detail={`${t.devMonths.toFixed(1)} months to build, ${d.months ?? 12} months of mapping`}
+            explain={`Time to build, fly and finish mapping, counted from ${fmtDate(briefOf(d.scenario).startJd)}, against ${fmtDate(MOON.deadlineJd)}, the day the landing site is chosen (a game premise). Data sent later does not count.`} />
+        ) : (
+          <Meter label="Time" value={b.traj.ok ? `${Math.round(t.slackDays)} days slack` : 'no route'} fill={b.traj.ok ? Math.min(1, t.devMonths * 30.44 / Math.max(1, t.devMonths * 30.44 + t.slackDays)) : 1}
+            status={st(!b.traj.ok || t.slackDays >= 0, t.slackDays < 30)} detail={`${t.devMonths.toFixed(1)} months to build, ${t.missionMonths.toFixed(0)} months to fly`}
+            explain={`Time to design, build and test, counted from ${fmtDate(briefOf(d.scenario).startJd)}, against your launch date. Apophis will not wait.`} />
+        )}
         <Meter label="Delta-v" value={`${(b.dv.needed * 1000).toFixed(0)} m/s`} fill={Math.min(1, b.dv.needed / 6)}
           status={st(m.feasible, b.dv.needed > 3.5)} detail={`${kg(m.prop)} of propellant at ${b.dv.ispS} s`}
-          explain={cadet ? 'Total change of speed after launch. Braking to stay with Apophis is the biggest part.' : <>Braking {(b.traj.dvArrive * 1000).toFixed(0)} m/s + operations {(b.traj.dvOps * 1000).toFixed(0)} m/s + 10% margin.{chief && ' Δv = Isp·g₀·ln(m₀/m_f).'}</>} />
+          explain={cadet ? `Total change of speed after launch. Braking ${moon ? 'into orbit around the Moon' : 'to stay with Apophis'} is the biggest part.` : <>Braking {(b.traj.dvArrive * 1000).toFixed(0)} m/s + operations {(b.traj.dvOps * 1000).toFixed(0)} m/s + 10% margin.{chief && ' Δv = Isp·g₀·ln(m₀/m_f).'}</>} />
       </div>
       <div className="panel">
         <h3>Consoles</h3>
@@ -263,14 +270,16 @@ export function diffDesign(a: Design, b: Design): string[] {
   swap('Mission', BRIEFS, a.scenario, b.scenario);
   swap('Class', CLASSES, a.klass, b.klass);
   if (a.missionType !== b.missionType) out.push(b.missionType === 'flyby' ? 'Rendezvous → flyby' : 'Flyby → rendezvous');
-  if (Math.abs(a.launchJd - b.launchJd) >= 1) out.push(`Launch ${fmtDate(a.launchJd)} → ${fmtDate(b.launchJd)}`);
-  if (Math.abs(a.arriveJd - b.arriveJd) >= 1) out.push(`Arrival ${fmtDate(a.arriveJd)} → ${fmtDate(b.arriveJd)}`);
+  const moon = b.scenario === 'moon';
+  if (!moon && Math.abs(a.launchJd - b.launchJd) >= 1) out.push(`Launch ${fmtDate(a.launchJd)} → ${fmtDate(b.launchJd)}`);
+  if (!moon && Math.abs(a.arriveJd - b.arriveJd) >= 1) out.push(`Arrival ${fmtDate(a.arriveJd)} → ${fmtDate(b.arriveJd)}`);
+  if (moon && (a.months ?? 12) !== (b.months ?? 12)) out.push(`Mapping ${a.months ?? 12} → ${b.months ?? 12} months`);
   if (a.standoff !== b.standoff || a.missionType !== b.missionType) {
-    const la = a.missionType === 'flyby' ? FLYBY_PASSES : STANDOFFS, lb = b.missionType === 'flyby' ? FLYBY_PASSES : STANDOFFS;
-    out.push(`Distance: ${nm(la, a.standoff)} → ${nm(lb, b.standoff)}`);
+    const la = moon ? MOON_ORBITS : a.missionType === 'flyby' ? FLYBY_PASSES : STANDOFFS, lb = moon ? MOON_ORBITS : b.missionType === 'flyby' ? FLYBY_PASSES : STANDOFFS;
+    out.push(`${moon ? 'Orbit' : 'Distance'}: ${nm(la, a.standoff)} → ${nm(lb, b.standoff)}`);
   }
   swap('Rocket', ROCKETS, a.rocket, b.rocket);
-  sets('objective: ', OBJECTIVES, a.objectives, b.objectives);
+  sets('objective: ', [...OBJECTIVES, ...MOON_OBJECTIVES], a.objectives, b.objectives);
   sets('', INSTRUMENTS, a.instruments, b.instruments);
   swap('Antenna', ANTENNAS, a.antenna, b.antenna);
   swap('Transmitter', RADIOS, a.radio, b.radio);

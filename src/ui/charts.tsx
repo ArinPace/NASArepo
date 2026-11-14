@@ -159,6 +159,33 @@ export function OrbitView({ launchJd, arriveJd, nowJd, stays = true, size = 340,
   );
 }
 
+// ---------------------------------------------------------------- the Moon and its polar orbit
+/** Side view of a polar orbit. The gap to the surface is drawn larger than life so it can be seen. */
+export function MoonView({ altKm, progress, size = 300 }: { altKm: number; progress?: number; size?: number }) {
+  const c = size / 2, R = size * 0.3, gap = 7 + altKm * 0.22, ro = R + gap;
+  const still = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const craters = [[-0.35, -0.3, 0.16], [0.3, -0.45, 0.1], [0.1, 0.05, 0.2], [-0.5, 0.2, 0.09], [0.45, 0.25, 0.13], [-0.1, -0.62, 0.08], [0.02, 0.5, 0.11]];
+  const orbit = `M ${c} ${c - ro} A ${ro} ${ro} 0 1 1 ${c} ${c + ro} A ${ro} ${ro} 0 1 1 ${c} ${c - ro}`;
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} role="img" aria-label={`The Moon with a spacecraft in a polar orbit ${altKm} km above the surface, passing over both poles on every lap.`}>
+      <defs><clipPath id="moon-disc"><circle cx={c} cy={c} r={R} /></clipPath></defs>
+      <circle cx={c} cy={c} r={R} fill="#8f98a8" />
+      <g clipPath="url(#moon-disc)">
+        {craters.map(([x, y, r], k) => <circle key={k} cx={c + x * R} cy={c + y * R} r={r * R} fill="#7b8494" stroke="#a7afbd" strokeWidth={0.6} />)}
+        <rect x={c} y={c - R} width={R} height={2 * R} fill="#0b111b" opacity={0.45} />
+        <ellipse cx={c} cy={c + R} rx={R * 0.42} ry={R * 0.2} fill="#0b111b" opacity={0.85} />
+      </g>
+      <path d={orbit} fill="none" stroke="#f3efe6" strokeWidth={1.2} strokeDasharray="2 4" />
+      {progress !== undefined && <path d={orbit} fill="none" stroke="#46d38a" strokeWidth={2.5} pathLength={1} strokeDasharray={`${Math.max(0, Math.min(1, progress))} 1`} />}
+      <circle r={4.5} fill="#ffffff" stroke="#0b111b" strokeWidth={1.5} cx={still ? c : 0} cy={still ? c - ro : 0}>
+        {!still && <animateMotion dur="7s" repeatCount="indefinite" path={orbit} />}
+      </circle>
+      <text x={c} y={c + R + gap + 16} textAnchor="middle" className="axis">south pole: permanent shadow</text>
+      <text x={c} y={c - R - gap - 8} textAnchor="middle" className="axis">{altKm} km up{progress !== undefined ? ` · ${Math.round(Math.max(0, Math.min(1, progress)) * 100)}% of the mapping done` : ''}</text>
+    </svg>
+  );
+}
+
 // ---------------------------------------------------------------- spacecraft drawing
 export function CraftView({ d, b }: { d: Design; b: Budgets }) {
   const W = 420, H = 230, cx = W / 2, cy = 120;

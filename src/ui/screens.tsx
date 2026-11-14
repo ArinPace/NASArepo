@@ -715,6 +715,7 @@ export function Credits() {
     <footer className="credits">
       <span>Orbits, launch windows and the flyby date come from public NASA and JPL sources, checked on {DATA_CHECKED}. Anything marked “game value” is a plausible number chosen for the game.</span>
       <span>Built for the NASA Space Apps Challenge 2026. Not affiliated with or endorsed by NASA, ESA or JAXA.</span>
+      <span>The code was written with Claude, an AI assistant. How it was used is recorded in AI_USE.md in the project repository.</span>
     </footer>
   );
 }

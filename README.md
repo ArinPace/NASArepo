@@ -12,6 +12,11 @@ to the decision behind it.
 file and works offline. (If GitHub Pages is enabled for the `docs/` folder,
 it is also at `https://arinpace.github.io/NASArepo/`.)
 
+**Watch it:** `docs/demo.mp4` is a 29-second captioned screen recording
+(`https://arinpace.github.io/NASArepo/demo.mp4` once GitHub Pages is on).
+`python3 demo/make_demo.py --team "Team name"` records it again; it needs
+Python Playwright, Chrome and ffmpeg.
+
 ## What makes it different
 
 - **Real launch windows.** The launch chart is computed in the browser by a

@@ -30,6 +30,9 @@ the game, not copied from a source. Game values are labelled as such in the game
 | Data rate | Link budget to a 34 m Deep Space Network dish at X-band | In family with Mars Reconnaissance Orbiter (0.5 to 4 Mbps) |
 | Lunar orbit (for the second scenario) | Patched conics | 50 km orbit: 113 min period, 48 min maximum eclipse, as for Lunar Reconnaissance Orbiter |
 
+The start screen of the game has a "How real is this?" panel that reruns the
+first six of these checks, plus an Earth-orbit check, in the browser.
+
 ## Known simplifications
 
 - The Apophis orbit is rounded and propagated without planetary pulls. The
@@ -41,7 +44,9 @@ the game, not copied from a source. Game values are labelled as such in the game
 
 ## Game values
 
-Mission class cost caps and build times; hardware costs; test costs and
+The chances behind the calls made in flight (wind shear at launch, solar
+storm damage, debris during the flyby, a missed flyby picture) and the price
+of emergency network time; mission class cost caps and build times; hardware costs; test costs and
 durations; failure probabilities; the small launcher and shared ride;
 Falcon 9 expended and Falcon Heavy prices; Deep Space Network hourly cost and
 figure of merit (approximate); masses and powers of instruments other than

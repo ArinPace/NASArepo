@@ -36,8 +36,12 @@ Python Playwright, Chrome and ffmpeg.
   keep observing? Each call goes to the console that owns it.
 - **Causes, not dice.** Each flight is one seeded world. Fly the same world
   again with one change and the flight history shows what that change bought.
-- **Two missions.** *Witness* gives 28 months to rendezvous with Apophis.
-  *Last call* starts a year later, when only fast flybys are left.
+- **Three missions.** *Witness* gives 28 months to rendezvous with Apophis.
+  *Last call* starts a year later, when only fast flybys are left. *Sandbox*
+  removes the cost and schedule limits and keeps the physics.
+- **Best flights.** Each device keeps a board of its best flights. Load one
+  to get the same design in the same world, or send a mission code to
+  another team and see who does better.
 - **How real is this?** A button on the start screen reruns seven comparisons
   with published values in the player's own browser.
 - **Three depths.** Cadet (plain words), Engineer (numbers), Chief engineer
@@ -76,7 +80,8 @@ short code holding the design and the world number.
 
 See [DATA_SOURCES.md](DATA_SOURCES.md). Numbers copied from a public source
 carry a link in the game. Numbers chosen for the game are labelled
-"game value". See [AI_USE.md](AI_USE.md) for how AI tools were used.
+"game value". See [AI_USE.md](AI_USE.md) for how AI tools were used, and
+[CLASSROOM.md](CLASSROOM.md) for a one-lesson plan.
 
 Not affiliated with or endorsed by NASA, ESA or JAXA.
 

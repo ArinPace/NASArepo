@@ -286,6 +286,38 @@ export function diffDesign(a: Design, b: Design): string[] {
   return out;
 }
 
+// ---------- best flights on this device
+export interface Best {
+  mission: string;
+  crew: string;
+  brief: string;
+  klass: string;
+  total: number;
+  headline: string;
+  when: string;
+  code: string;
+}
+const BEST_KEY = 'go-no-go-best-v1';
+export function loadBest(): Best[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(BEST_KEY) ?? '[]');
+    return Array.isArray(list) ? list.filter((x) => x && typeof x.total === 'number' && typeof x.code === 'string').slice(0, 8) : [];
+  } catch {
+    return [];
+  }
+}
+export function saveBest(entry: Best): void {
+  try {
+    const list = [...loadBest().filter((x) => x.code !== entry.code || x.total > entry.total), entry]
+      .filter((x, k, all) => all.findIndex((y) => y.code === x.code) === k)
+      .sort((x, y) => y.total - x.total)
+      .slice(0, 8);
+    localStorage.setItem(BEST_KEY, JSON.stringify(list));
+  } catch {
+    /* the board is optional */
+  }
+}
+
 // ---------- share codes ----------
 export function encodeShare(g: Game): string {
   try {

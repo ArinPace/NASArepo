@@ -169,7 +169,7 @@ export function evaluate(d: Design, trajIn?: Traj): Budgets {
   const traj = trajIn ?? trajectory(d);
   const brief = briefOf(d.scenario);
   const klass0 = find(CLASSES, d.klass);
-  const klass = brief.targetMult === 1 ? klass0 : { ...klass0, scienceTarget: Math.round(klass0.scienceTarget * brief.targetMult) };
+  const klass = brief.targetMult === 1 && brief.capMult === 1 ? klass0 : { ...klass0, scienceTarget: Math.round(klass0.scienceTarget * brief.targetMult), capM: klass0.capM * brief.capMult };
   const rocket = find(ROCKETS, d.rocket);
   const instruments = INSTRUMENTS.filter((i) => d.instruments.includes(i.id));
   const antenna = find(ANTENNAS, d.antenna), radio = find(RADIOS, d.radio), prop = find(PROPS, d.prop);

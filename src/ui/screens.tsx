@@ -8,7 +8,7 @@ import { Check, runChecks } from '../sim/checks';
 import { Budgets, CONSOLES, Design, LAST_ARRIVAL_JD, MIN_TOF_DAYS, SnowballStep, bestArrival, defaultDesign, earthKmAt, evaluate, snowball } from '../sim/design';
 import { FlightResult, McResult, monteCarlo, scoreFlight, simulate } from '../sim/flight';
 import { CostCurve, CraftView, LaunchChart, OddsChart, OrbitView, Postcard, RAMP_CSS, Telemetry } from './charts';
-import { DepthContext, FindingRow, Game, Lamp, Poll, STEPS, SrcTag, Term, consoleOwners, decodeShare, detail, diffDesign, encodeShare, headlineOf, kg, money, pct, rate } from './core';
+import { Best, DepthContext, FindingRow, Game, Lamp, Poll, STEPS, SrcTag, Term, consoleOwners, loadBest, decodeShare, detail, diffDesign, encodeShare, headlineOf, kg, money, pct, rate } from './core';
 
 type Set = (patch: Partial<Design>) => void;
 const todayJd = () => Date.now() / 86400000 + 2440587.5;
@@ -30,6 +30,12 @@ export function Setup({ g, update, start }: { g: Game; update: (p: Partial<Game>
   const now = todayJd();
   const days = Math.max(0, Math.round(APOPHIS.flybyJd - now));
   const setPlayer = (i: number, name: string) => update({ players: g.players.map((p, k) => (k === i ? name : p)) });
+  const [best] = useState<Best[]>(() => loadBest());
+  const load = (text: string): boolean => {
+    const s = decodeShare(text);
+    if (s) update({ design: s.design, seed: s.seed, mission: s.mission, stage: 'build', reached: 3, mc: null, mcKey: '', result: null, gates: [], calls: {}, history: [] });
+    return !!s;
+  };
   return (
     <div className="work">
       <section className="hero">
@@ -46,7 +52,7 @@ export function Setup({ g, update, start }: { g: Game; update: (p: Partial<Game>
       </section>
       <section className="panel">
         <h3>Choose your mission</h3>
-        <div className="grid two">
+        <div className="grid">
           {BRIEFS.map((x) => (
             <button type="button" key={x.id} className="card" aria-pressed={g.design.scenario === x.id}
               onClick={() => g.design.scenario !== x.id && update({ design: defaultDesign(x.klass, x.id), mc: null, mcKey: '', gates: [], reached: 0 })}>
@@ -87,13 +93,29 @@ export function Setup({ g, update, start }: { g: Game; update: (p: Partial<Game>
         <label style={{ flex: 1, minWidth: 220 }}>Or load a shared mission code
           <input id="share-in" type="text" value={code} onChange={(e) => { setCode(e.target.value); setBad(false); }} placeholder="Paste a code" />
         </label>
-        <button type="button" className="btn ghost small" disabled={!code.trim()} onClick={() => {
-          const s = decodeShare(code);
-          if (s) update({ design: s.design, seed: s.seed, mission: s.mission, stage: 'build', reached: 3, mc: null, result: null, gates: [] });
-          else setBad(true);
-        }}>Load</button>
+        <button type="button" className="btn ghost small" disabled={!code.trim()} onClick={() => { if (!load(code)) setBad(true); }}>Load</button>
         {bad && <span className="small" role="alert">That code could not be read. Check that all of it was copied.</span>}
       </div>
+      {best.length > 0 && (
+        <section className="panel">
+          <h3>Best flights on this device</h3>
+          <p className="muted small">Load a flight to get the same design in the same world, then try to beat it. To challenge another team, send them the mission code from your debrief.</p>
+          <div className="chart-wrap">
+            <table>
+              <thead><tr><th className="r">Rank</th><th>Mission</th><th>Crew</th><th>Brief and class</th><th className="r">Score</th><th>Outcome</th><th>Date</th><th></th></tr></thead>
+              <tbody>
+                {best.map((x, k) => (
+                  <tr key={x.code}>
+                    <td className="r num">{k + 1}</td><td>{x.mission}</td><td>{x.crew}</td><td>{x.brief}, {x.klass}</td>
+                    <td className="r num">{x.total}</td><td>{x.headline}</td><td className="num">{x.when}</td>
+                    <td><button type="button" className="btn ghost small" onClick={() => load(x.code)}>Load</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       <Validation />
     </div>
   );
@@ -148,7 +170,7 @@ export function Pitch({ d, set, setDesign }: { d: Design; set: Set; setDesign: (
           {CLASSES.map((c) => (
             <button type="button" key={c.id} className="card" aria-pressed={d.klass === c.id} onClick={() => d.klass !== c.id && setDesign({ ...defaultDesign(c.id, d.scenario), objectives: d.objectives })}>
               <span className="name">{c.name} <span className="tag">{c.nasaClass}</span></span>
-              <span className="facts num"><span>cap {money(c.capM)}</span><span>{c.devMonths} months to build</span></span>
+              <span className="facts num"><span>cap {money(c.capM * brief.capMult)}</span><span>{c.devMonths} months to build</span></span>
               <span className="what">{c.blurb}</span>
             </button>
           ))}

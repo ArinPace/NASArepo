@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { Design, SnowballStep, evaluate, forGate, snowball } from './sim/design';
 import { GateRecord, monteCarlo, scoreFlight, simulate } from './sim/flight';
-import { DepthContext, Depth, Game, Poll, Rail, Run, STEPS, Stage, headlineOf, newGame } from './ui/core';
+import { DepthContext, Depth, Game, Poll, Rail, Run, STEPS, Stage, encodeShare, headlineOf, newGame, saveBest } from './ui/core';
+import { briefOf } from './sim/data';
 import { Build, Credits, Debrief, Fly, Pitch, Route, Setup, TestScreen, Thousand } from './ui/screens';
 
 const KEY = 'go-no-go-v1';
@@ -60,6 +61,10 @@ function App({ boot }: { boot: Partial<Game> }) {
     const res = g.result!;
     const score = scoreFlight(res, b, g.gates, g.mc && !stale ? g.mc.success : null, g.players.length);
     const run: Run = { flight: g.flight, seed: g.seed, design: g.design, total: score.total, science: res.sciencePoints, costM: res.finalCostM, headline: headlineOf(res, b.klass.scienceTarget) };
+    const brief = briefOf(g.design.scenario);
+    if (brief.ranked) {
+      saveBest({ mission: g.mission || 'Mission', crew: g.players.join(', '), brief: brief.name, klass: b.klass.name, total: Math.round(score.total), headline: run.headline, when: new Date().toISOString().slice(0, 10), code: encodeShare(g) });
+    }
     update({ stage: 'debrief', reached: 5, history: [...g.history.filter((r) => r.flight !== g.flight), run].slice(-8) });
   };
 

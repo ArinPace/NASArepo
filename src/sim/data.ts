@@ -41,20 +41,27 @@ export interface Brief {
   tag: string;
   startJd: number; // the day building can begin
   targetMult: number; // scales the science a class is expected to return
+  capMult: number; // scales the cost cap
+  ranked: boolean; // whether flights count for the best-flights board
   klass: 'smallsat' | 'explorer' | 'flagship'; // suggested class
   blurb: string;
   twist: string;
 }
 export const BRIEFS: Brief[] = [
   {
-    id: 'apophis', name: 'Witness', tag: 'The full mission', startJd: jdFromDate(2026, 12, 1), targetMult: 1, klass: 'explorer',
+    id: 'apophis', name: 'Witness', tag: 'The full mission', startJd: jdFromDate(2026, 12, 1), targetMult: 1, capMult: 1, ranked: true, klass: 'explorer',
     blurb: 'Work starts on 1 December 2026. You have 28 months to be at Apophis before Earth pulls on it, and to stay through the flyby.',
     twist: 'Time is on your side if you find the right launch window.',
   },
   {
-    id: 'lastcall', name: 'Last call', tag: 'Hard: 16 months', startJd: jdFromDate(2027, 12, 1), targetMult: 0.6, klass: 'smallsat',
+    id: 'lastcall', name: 'Last call', tag: 'Hard: 16 months', startJd: jdFromDate(2027, 12, 1), targetMult: 0.6, capMult: 1, ranked: true, klass: 'smallsat',
     blurb: 'The big mission was cancelled. Work starts on 1 December 2027 with 16 months left. The slow, cheap routes have already closed.',
     twist: 'Only fast routes remain. Get anything there and bring home what you can.',
+  },
+  {
+    id: 'sandbox', name: 'Sandbox', tag: 'No limits', startJd: jdFromDate(2025, 1, 1), targetMult: 1, capMult: 20, ranked: false, klass: 'flagship',
+    blurb: 'Money and build time are no object: the cost cap is 20 times higher and the hardware is always ready. The physics does not bend.',
+    twist: 'For trying ideas. Flights here stay off the best-flights board.',
   },
 ];
 export const briefOf = (id: string): Brief => BRIEFS.find((x) => x.id === id) ?? BRIEFS[0];

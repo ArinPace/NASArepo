@@ -40,13 +40,14 @@ Claude (Anthropic), used through the Claude app with web search and a code works
 | 13 Nov, evening | Asked for a more exciting, feature-rich, realistic plan using real data and simulations | A detailed plan with checked data sources |
 | 13 Nov, evening | Asked the AI to build it | The AI declined to write code before the hackathon opened and scheduled the build for 9:00 a.m. on 14 November |
 | 14 Nov, 9:01 a.m. | Build started automatically, as scheduled | This repository, the project page draft and the demo recording |
+| 14 Nov, 1:15 p.m. | A follow-up the AI had scheduled for itself, with no new prompt from the team | The Ice Hunter lunar mission, built on a separate branch and merged after every check passed |
 
 No code or assets were created before 9:00 a.m. on 14 November 2026. The
 concept, plan and research were done the evening before.
 
 ## How the AI's work was checked
 
-- 16 automated tests, most comparing the simulation with published values (see
+- 18 automated tests, most comparing the simulation with published values (see
   DATA_SOURCES.md).
 - Full missions were played in a headless browser, solo and with four players.
 - Every number that is not from a public source is labelled "game value" in

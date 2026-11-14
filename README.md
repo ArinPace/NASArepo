@@ -4,9 +4,9 @@ A space mission design game built on real NASA and JPL data, made for the
 **NASA Space Apps Challenge 2026** (challenge: *Space Mission Design Game*).
 
 Players design a real mission to asteroid **Apophis**, which passes about
-32,000 km above Earth on 13 April 2029. They defend the design at four
-NASA-style review gates, fly it, and get a debrief that links every outcome
-to the decision behind it.
+32,000 km above Earth on 13 April 2029, or to the ice at the **Moon's south
+pole**. They defend the design at four NASA-style review gates, fly it, and
+get a debrief that links every outcome to the decision behind it.
 
 **Play it:** open `docs/index.html` in any browser. It is one self-contained
 file and works offline. (If GitHub Pages is enabled for the `docs/` folder,
@@ -36,13 +36,17 @@ Python Playwright, Chrome and ffmpeg.
   keep observing? Each call goes to the console that owns it.
 - **Causes, not dice.** Each flight is one seeded world. Fly the same world
   again with one change and the flight history shows what that change bought.
-- **Three missions.** *Witness* gives 28 months to rendezvous with Apophis.
-  *Last call* starts a year later, when only fast flybys are left. *Sandbox*
-  removes the cost and schedule limits and keeps the physics.
+- **Four missions.** *Witness* gives 28 months to rendezvous with Apophis.
+  *Last call* starts a year later, when only fast flybys are left. *Ice
+  Hunter* is a polar orbiter mapping ice at the Moon's south pole, built on
+  Lunar Reconnaissance Orbiter's published figures: the trade is orbit
+  height against fuel, and the battery has to last through the real total
+  lunar eclipses of 2028 and 2029. *Sandbox* removes the cost and schedule
+  limits and keeps the physics.
 - **Best flights.** Each device keeps a board of its best flights. Load one
   to get the same design in the same world, or send a mission code to
   another team and see who does better.
-- **How real is this?** A button on the start screen reruns seven comparisons
+- **How real is this?** A button on the start screen reruns ten comparisons
   with published values in the player's own browser.
 - **Three depths.** Cadet (plain words), Engineer (numbers), Chief engineer
   (the equations).
@@ -50,14 +54,15 @@ Python Playwright, Chrome and ffmpeg.
 ## The six resources
 
 Mass, power, data, budget, time and delta-v stay on screen as live meters.
-In this scenario **time** is the critical one: Apophis will not wait.
+For Apophis **time** is the critical one: the asteroid will not wait. At the
+Moon it is **power**: every lap has 48 minutes of night.
 
 ## Run and test
 
 ```
 npm install
 npm run build      # writes docs/index.html
-npm test           # 16 tests, most against published values
+npm test           # 18 tests, most against published values
 npm run dev        # rebuilds on change, serves http://localhost:8000
 ```
 
@@ -69,6 +74,7 @@ npm run dev        # rebuilds on change, serves http://localhost:8000
 | `src/sim/data.ts` | Bundled data, each entry with its source |
 | `src/sim/design.ts` | Budgets (mass, power, data, cost, time, delta-v) and review findings |
 | `src/sim/flight.ts` | Seeded flight simulation, in-flight calls, 1,000 flights, scoring |
+| `src/sim/moon.ts` | Ice Hunter: mapping from lunar orbit, eclipses, science scoring |
 | `src/sim/checks.ts` | The live comparisons with published values |
 | `src/ui/` | React screens, charts and the poll |
 | `tests/` | Checks against Vallado's Lambert example, NASA's Apophis flyby time, ESA's Ramses trajectory, LRO, OSIRIS-REx, SpaceX figures |

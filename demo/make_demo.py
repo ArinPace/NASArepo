@@ -45,6 +45,14 @@ def main():
         pg.evaluate("""([seed, players]) => { const s = JSON.parse(localStorage.getItem('go-no-go-v1')); s.seed = seed; s.players = players; s.stage = 'setup'; localStorage.setItem('go-no-go-v1', JSON.stringify(s)); }""", [args.seed, PLAYERS])
         pg.reload(); pg.wait_for_timeout(900)
         pg.evaluate(OVERLAY)
+        # A sync flash: the caption bar turns magenta for a moment. Finding it in the
+        # recording tells us how far the recording's clock is from this script's clock.
+        pg.wait_for_timeout(600)
+        pg.evaluate("() => { document.getElementById('demo-caption').style.background = '#ff00ff'; }")
+        sync_wall = time.time() - t0
+        pg.wait_for_timeout(400)
+        pg.evaluate("() => { document.getElementById('demo-caption').style.background = 'rgba(7,10,18,.93)'; }")
+        pg.wait_for_timeout(600)
 
         def caption(text):
             pg.evaluate("t => { document.getElementById('demo-line').textContent = t; }", text)
@@ -65,6 +73,7 @@ def main():
                 left = self.seconds - (time.time() - t0 - self.start)
                 if left > 0: pg.wait_for_timeout(int(left * 1000))
                 shots.append((self.start, self.start + self.seconds))
+                pg.wait_for_timeout(400)  # hold the picture a moment so the cut never shows the next screen
 
         def all_go():
             for b in pg.get_by_role('button', name='GO', exact=True).all(): b.click()
@@ -77,9 +86,9 @@ def main():
 
         # 2. pitch: pick the science
         scroll('science objectives', smooth=False, offset=20); pg.wait_for_timeout(200)
-        with Shot('GO / NO-GO: design a real mission to asteroid Apophis', 3.5):
-            pg.wait_for_timeout(700); pg.get_by_role('checkbox', name='Watch it change').dispatch_event('click')
-            pg.wait_for_timeout(800); pg.get_by_role('checkbox', name='What it is made of').dispatch_event('click')
+        with Shot('GO / NO-GO: design a real mission to asteroid Apophis', 3.0):
+            pg.wait_for_timeout(500); pg.get_by_role('checkbox', name='Watch it change').dispatch_event('click')
+            pg.wait_for_timeout(700); pg.get_by_role('checkbox', name='What it is made of').dispatch_event('click')
         all_go(); pg.get_by_role('button', name='Phase A: choose the route').click(); pg.wait_for_timeout(600)
 
         # 3. route: walk the launch date to the good window
@@ -97,7 +106,7 @@ def main():
         pg.get_by_role('button', name='Precise pointing').click()
         pg.get_by_role('button', name='1 m dish').click(); pg.wait_for_timeout(200)
         scroll('instruments', smooth=False, offset=20); pg.wait_for_timeout(300)
-        with Shot('Every part drags mass, power and cost with it', 4.0):
+        with Shot('Every part drags mass, power and cost with it', 3.5):
             pg.wait_for_timeout(500); pg.get_by_role('checkbox', name='Visible-infrared spectrometer').dispatch_event('click')
             pg.wait_for_timeout(600); pg.get_by_role('checkbox', name='Telescopic camera').dispatch_event('click')
             pg.wait_for_timeout(500); scroll(top=0)
@@ -120,8 +129,8 @@ def main():
             pg.locator('.poll.call').wait_for(timeout=20000)
         except Exception:
             raise SystemExit('no call came up on launch day: choose another --seed')
-        with Shot('Then make the calls in flight', 4.0):
-            pg.wait_for_timeout(1700); pg.locator('.poll.call button.card').first.dispatch_event('click')
+        with Shot('Then make the calls in flight', 3.5):
+            pg.wait_for_timeout(1500); pg.locator('.poll.call button.card').first.dispatch_event('click')
             pg.wait_for_timeout(150); pg.get_by_role('button', name='Faster').dispatch_event('click')
         for _ in range(30):  # finish the flight, taking the second option at each remaining call
             pg.wait_for_timeout(200)
@@ -135,13 +144,41 @@ def main():
 
         # 8. the debrief
         scroll(top=0, smooth=False); pg.wait_for_timeout(200)
-        with Shot('See which decision made the difference. Next: a lunar ice mission', 4.5):
-            pg.wait_for_timeout(1900); scroll('why it happened', offset=30)
+        with Shot('See which decision made the difference', 3.5):
+            pg.wait_for_timeout(1500); scroll('why it happened', offset=30)
         print('headline:', pg.locator('h2').first.inner_text(), '| score', pg.locator('.score').first.inner_text())
+
+        # 9. the other world: Ice Hunter
+        scroll('try again', smooth=False, offset=200); pg.wait_for_timeout(200)
+        pg.get_by_role('button', name='New mission').click(); pg.wait_for_timeout(400)
+        pg.locator('button.card', has_text='Ice Hunter').click(); pg.wait_for_timeout(200)
+        pg.get_by_role('button', name='Begin Pre-Phase A').click(); pg.wait_for_timeout(300)
+        all_go(); pg.get_by_role('button', name='Phase A: choose the route').click(); pg.wait_for_timeout(500)
+        pg.locator('button.card', has_text='50 km orbit').dispatch_event('click'); pg.wait_for_timeout(200)
+        scroll('how long will you map', smooth=False, offset=300); pg.wait_for_timeout(300)
+        with Shot('Also inside: hunt for ice at the Moon\u2019s south pole', 2.5):
+            pg.wait_for_timeout(900); pg.locator('button.card', has_text='12 months').dispatch_event('click')
         video = pg.video
-        ctx.close(); br.close()
+        ctx.close()
+        wall = time.time() - t0
+        br.close()
         raw = video.path()
 
+    # Find the sync flash in the recording and shift every cut by the difference.
+    from PIL import Image
+    frames = tmp / 'sync'
+    frames.mkdir()
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-t', str(sync_wall + 3), '-i', str(raw), '-vf', f'fps=25,crop={W}:20:0:{H - 30},scale=64:2', str(frames / 'f%04d.png')], check=True)
+    seen = None
+    for k, f in enumerate(sorted(frames.glob('f*.png'))):
+        r, g, b = Image.open(f).convert('RGB').getpixel((32, 1))
+        if r > 200 and g < 90 and b > 200:
+            seen = k / 25
+            break
+    if seen is None: raise SystemExit('could not find the sync flash in the recording')
+    lag = sync_wall - seen
+    print('recording lag', round(lag, 2), 's')
+    shots[:] = [(a - lag, b - lag) for a, b in shots]
     total = sum(b - a for a, b in shots)
     print('shots:', json.dumps([(round(a, 2), round(b, 2)) for a, b in shots]), 'total', round(total, 2))
     assert total <= 29.9, 'the demo must stay under 30 seconds'

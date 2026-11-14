@@ -41,6 +41,9 @@ list.
 - Switch to **Engineer** or **Chief engineer** to see the numbers and the
   equations behind each meter.
 - Try **Last call**: the same asteroid with a year less to prepare.
+- Try **Ice Hunter**: no launch window at all. Ask why the battery is now
+  the part that can end the mission, and look up the eclipse of 31 December
+  2028.
 - Press "Run the checks" on the start screen and ask why the model's Apophis
   flyby is three hours off NASA's time.
 - Compare your design with ESA's real Ramses mission in the debrief.

@@ -18,6 +18,17 @@ the game, not copied from a source. Game values are labelled as such in the game
 | Risk classes A to D | Class meanings and example missions | [NASA risk classification fact sheet](https://www.nasa.gov/wp-content/uploads/2023/12/risk-classification-fact-sheet.pdf) |
 | 70% confidence rule | Projects above $250M budget at the 70% joint confidence level | [Prince and Smart, NASA NTRS](https://ntrs.nasa.gov/api/citations/20180005523/downloads/20180005523.pdf) |
 
+## Real data for Ice Hunter (the Moon)
+
+| Data | Value used | Source |
+| --- | --- | --- |
+| Lunar Reconnaissance Orbiter spacecraft | 1,916 kg at launch, 1,018 kg dry, 898 kg of propellant, 685 W | [NASA LRO launch press kit, as reprinted by Spaceflight Now](https://spaceflightnow.com/atlas/av020/090610lro.html) |
+| LRO instruments | Neutron detector 25.8 kg and 11.6 W; laser altimeter 11.3 kg and 33.4 W; thermal radiometer 11.0 kg and 24.7 W; imaging radar 13.8 kg and 7.0 W; camera 19.2 kg and 24.0 W; neutron detector resolves 10 km | Same press kit |
+| LRO orbit | 50 km polar orbit held with monthly burns; a four to five day minimum-energy transfer; camera detail of 50 cm from 50 km | [Vondrak and others, LRO mission overview, NASA Technical Reports Server](https://ntrs.nasa.gov/api/citations/20140000908/downloads/20140000908.pdf) |
+| LRO lap time, speed, data volume | About 113 minutes a lap at 1.6 km/s; 572 Gb of data a day | [eoPortal, Lunar Reconnaissance Orbiter](https://eoportal.org/satellite-missions/lro) |
+| LRO propellant budget | 898 kg of fuel for 1,263 m/s | [LRO instrument suite briefing](https://faculty.tamuc.edu/cdavis/resources/Insctructional/LRO%20Instrument%20Suite%20and%20Measurements.pdf) |
+| Total lunar eclipses | 31 December 2028, 26 June 2029 and 20 December 2029, each with about three and a half hours in Earth's umbra | [Eclipse predictions by Fred Espenak, NASA GSFC](https://eclipse.gsfc.nasa.gov/LEdecade/LEdecade2021.html) |
+
 ## Models
 
 | Model | Method | Check (see `tests/`) |
@@ -28,7 +39,8 @@ the game, not copied from a source. Game values are labelled as such in the game
 | Propellant | Rocket equation with tank mass and a 15% growth allowance, solved in closed form | Adding 21 kg of instrument adds more than 31 kg at launch |
 | Solar power | 270 W/m² at 1 au, inverse square, 8% losses | Within 15% of OSIRIS-REx at 0.9 and 1.36 au |
 | Data rate | Link budget to a 34 m Deep Space Network dish at X-band | In family with Mars Reconnaissance Orbiter (0.5 to 4 Mbps) |
-| Lunar orbit (for the second scenario) | Patched conics | 50 km orbit: 113 min period, 48 min maximum eclipse, as for Lunar Reconnaissance Orbiter |
+| Lunar orbit (Ice Hunter) | Patched conics: a transfer just short of escape, then a capture burn into a circular polar orbit | 50 km orbit: 113 minute lap, 48 minutes of night, 829 m/s to capture. Capture plus a year of orbit keeping fits inside LRO's 1,263 m/s |
+| Battery | Night on each lap, and the hours in Earth's shadow during a total lunar eclipse, against battery capacity | The rocket equation with LRO's published masses gives 1,395 m/s against the published 1,263 m/s |
 
 The start screen of the game has a "How real is this?" panel that reruns the
 position, launch window, rocket, solar power and data rate checks, plus an
@@ -42,8 +54,15 @@ Earth-orbit check, in the browser.
 - After 13 April 2029 Apophis moves to a new orbit. The game does not offer
   arrivals after the flyby.
 - Trajectories are direct, single-arc transfers with no deep-space manoeuvres.
+- At the Moon, the hours without sunlight in a lunar eclipse are taken as the
+  whole time the Moon spends in Earth's umbra. Solar panels are sized for the
+  longest night an orbit can have.
 
 ## Game values
+
+In Ice Hunter: the landing-site decision date of 1 July 2029, the fuel to
+hold a 100 km or 30 km orbit, the compact neutron counter, instrument costs
+and data rates, and the chance of a missed correcting burn.
 
 The chances behind the calls made in flight (wind shear at launch, solar
 storm damage, debris during the flyby, a missed flyby picture) and the price

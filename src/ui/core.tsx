@@ -1,7 +1,8 @@
 import { ReactNode, useState, createContext, useContext } from 'react';
-import { GLOSSARY, Src } from '../sim/data';
+import { ADCS, ANTENNAS, BATTERIES, BRIEFS, CLASSES, FLYBY_PASSES, GLOSSARY, INSTRUMENTS, OBJECTIVES, PROPS, RADIOS, REDUNDANCY, ROCKETS, STANDOFFS, STORAGES, Src, TESTS, briefOf } from '../sim/data';
+import { fmtDate } from '../sim/astro';
 import { Budgets, CONSOLES, ConsoleId, Design, Finding, defaultDesign } from '../sim/design';
-import { FlightResult, GateRecord, McResult } from '../sim/flight';
+import { Calls, FlightResult, GateRecord, McResult } from '../sim/flight';
 
 export type Depth = 'cadet' | 'engineer' | 'chief';
 export type Stage = 'setup' | 'pitch' | 'route' | 'build' | 'test' | 'fly' | 'debrief';
@@ -18,6 +19,25 @@ export interface Game {
   mc: McResult | null;
   mcKey: string;
   result: FlightResult | null;
+  calls: Calls; // choices made at in-flight decision points
+  flight: number; // counts launches, so each flight plays from the start
+  history: Run[]; // earlier flights, for comparison
+}
+
+/** One finished flight, kept so the next attempt can be compared with it. */
+export interface Run {
+  flight: number;
+  seed: number;
+  design: Design;
+  total: number;
+  science: number;
+  costM: number;
+  headline: string;
+}
+
+export function headlineOf(res: FlightResult, target: number): string {
+  const frac = res.sciencePoints / target;
+  return !res.launched ? 'Never flew' : res.lost ? 'Mission lost' : frac >= 0.85 ? 'Mission success' : frac >= 0.5 ? 'Partial success' : 'Science fell short';
 }
 
 export const STEPS: { id: Stage; phase: string; name: string; gate: string; next: string }[] = [
@@ -33,6 +53,7 @@ export function newGame(): Game {
   return {
     stage: 'setup', reached: 0, depth: 'cadet', players: ['Flight'], seed: 1 + Math.floor(Math.random() * 99999),
     mission: 'SENTINEL', design: defaultDesign('explorer'), gates: [], mc: null, mcKey: '', result: null,
+    calls: {}, flight: 0, history: [],
   };
 }
 
@@ -128,7 +149,7 @@ export function Rail({ b, d }: { b: Budgets; d: Design }) {
           explain={<>Hardware {money(c.hardware)}, management and integration {money(c.wraps)}, rocket {money(c.launch)}, operations {money(c.ops)}, tests {money(c.tests)}, network time {money(c.dsn)}, reserve {money(c.reserve)}.</>} />
         <Meter label="Time" value={b.traj.ok ? `${Math.round(t.slackDays)} days slack` : 'no route'} fill={b.traj.ok ? Math.min(1, t.devMonths * 30.44 / Math.max(1, t.devMonths * 30.44 + t.slackDays)) : 1}
           status={st(!b.traj.ok || t.slackDays >= 0, t.slackDays < 30)} detail={`${t.devMonths.toFixed(1)} months to build, ${t.missionMonths.toFixed(0)} months to fly`}
-          explain="Time to design, build and test, counted from 1 December 2026, against your launch date. Apophis will not wait." />
+          explain={`Time to design, build and test, counted from ${fmtDate(briefOf(d.scenario).startJd)}, against your launch date. Apophis will not wait.`} />
         <Meter label="Delta-v" value={`${(b.dv.needed * 1000).toFixed(0)} m/s`} fill={Math.min(1, b.dv.needed / 6)}
           status={st(m.feasible, b.dv.needed > 3.5)} detail={`${kg(m.prop)} of propellant at ${b.dv.ispS} s`}
           explain={cadet ? 'Total change of speed after launch. Braking to stay with Apophis is the biggest part.' : <>Braking {(b.traj.dvArrive * 1000).toFixed(0)} m/s + operations {(b.traj.dvOps * 1000).toFixed(0)} m/s + 10% margin.{chief && ' Δv = Isp·g₀·ln(m₀/m_f).'}</>} />
@@ -230,6 +251,41 @@ export function Poll(props: { gate: string; next: string; b: Budgets; players: s
   );
 }
 
+// ---------- what changed between two designs
+export function diffDesign(a: Design, b: Design): string[] {
+  const out: string[] = [];
+  const nm = <T extends { id: string; name: string }>(list: T[], id: string) => list.find((x) => x.id === id)?.name ?? id;
+  const swap = <T extends { id: string; name: string }>(label: string, list: T[], x: string, y: string) => { if (x !== y) out.push(`${label}: ${nm(list, x)} → ${nm(list, y)}`); };
+  const sets = <T extends { id: string; name: string }>(label: string, list: T[], x: string[], y: string[]) => {
+    for (const id of y) if (!x.includes(id)) out.push(`+ ${label}${nm(list, id)}`);
+    for (const id of x) if (!y.includes(id)) out.push(`− ${label}${nm(list, id)}`);
+  };
+  swap('Mission', BRIEFS, a.scenario, b.scenario);
+  swap('Class', CLASSES, a.klass, b.klass);
+  if (a.missionType !== b.missionType) out.push(b.missionType === 'flyby' ? 'Rendezvous → flyby' : 'Flyby → rendezvous');
+  if (Math.abs(a.launchJd - b.launchJd) >= 1) out.push(`Launch ${fmtDate(a.launchJd)} → ${fmtDate(b.launchJd)}`);
+  if (Math.abs(a.arriveJd - b.arriveJd) >= 1) out.push(`Arrival ${fmtDate(a.arriveJd)} → ${fmtDate(b.arriveJd)}`);
+  if (a.standoff !== b.standoff || a.missionType !== b.missionType) {
+    const la = a.missionType === 'flyby' ? FLYBY_PASSES : STANDOFFS, lb = b.missionType === 'flyby' ? FLYBY_PASSES : STANDOFFS;
+    out.push(`Distance: ${nm(la, a.standoff)} → ${nm(lb, b.standoff)}`);
+  }
+  swap('Rocket', ROCKETS, a.rocket, b.rocket);
+  sets('objective: ', OBJECTIVES, a.objectives, b.objectives);
+  sets('', INSTRUMENTS, a.instruments, b.instruments);
+  swap('Antenna', ANTENNAS, a.antenna, b.antenna);
+  swap('Transmitter', RADIOS, a.radio, b.radio);
+  swap('Recorder', STORAGES, a.storage, b.storage);
+  swap('Propulsion', PROPS, a.prop, b.prop);
+  swap('Pointing', ADCS, a.adcs, b.adcs);
+  swap('Battery', BATTERIES, a.battery, b.battery);
+  if (a.redundancy !== b.redundancy) out.push(`Backups: ${REDUNDANCY[a.redundancy].name} → ${REDUNDANCY[b.redundancy].name}`);
+  if (a.reservePct !== b.reservePct) out.push(`Cost reserve ${a.reservePct}% → ${b.reservePct}%`);
+  if (a.dsnHoursPerDay !== b.dsnHoursPerDay) out.push(`Network time ${a.dsnHoursPerDay} → ${b.dsnHoursPerDay} h a day`);
+  if (a.autoArray !== b.autoArray || (!b.autoArray && a.arrayM2 !== b.arrayM2)) out.push(b.autoArray ? 'Solar panels sized automatically' : `Solar panels set to ${b.arrayM2} m²`);
+  sets('test: ', TESTS, a.tests, b.tests);
+  return out;
+}
+
 // ---------- share codes ----------
 export function encodeShare(g: Game): string {
   try {
@@ -241,7 +297,7 @@ export function encodeShare(g: Game): string {
 export function decodeShare(code: string): { design: Design; seed: number; mission: string } | null {
   try {
     const o = JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
-    if (o && o.v === 1 && o.d && typeof o.s === 'number') return { design: { ...defaultDesign(o.d.klass), ...o.d }, seed: o.s, mission: String(o.m ?? 'SENTINEL').slice(0, 24) };
+    if (o && o.v === 1 && o.d && typeof o.s === 'number') return { design: { ...defaultDesign(o.d.klass, o.d.scenario), ...o.d }, seed: o.s, mission: String(o.m ?? 'SENTINEL').slice(0, 24) };
   } catch {
     /* not a valid code */
   }

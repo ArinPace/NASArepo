@@ -2,20 +2,21 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { Design, SnowballStep, evaluate, forGate, snowball } from './sim/design';
-import { GateRecord, monteCarlo, simulate } from './sim/flight';
-import { DepthContext, Depth, Game, Poll, Rail, STEPS, Stage, newGame } from './ui/core';
+import { GateRecord, monteCarlo, scoreFlight, simulate } from './sim/flight';
+import { DepthContext, Depth, Game, Poll, Rail, Run, STEPS, Stage, headlineOf, newGame } from './ui/core';
 import { Build, Credits, Debrief, Fly, Pitch, Route, Setup, TestScreen, Thousand } from './ui/screens';
 
 const KEY = 'go-no-go-v1';
-type Saved = Pick<Game, 'stage' | 'reached' | 'depth' | 'players' | 'seed' | 'mission' | 'design' | 'gates'>;
+type Saved = Pick<Game, 'stage' | 'reached' | 'depth' | 'players' | 'seed' | 'mission' | 'design' | 'gates' | 'calls' | 'flight' | 'history'>;
 const saveable = (g: Game): Saved => ({
   stage: g.stage === 'fly' ? 'test' : g.stage, reached: g.reached, depth: g.depth, players: g.players, seed: g.seed, mission: g.mission, design: g.design, gates: g.gates,
+  calls: g.stage === 'fly' ? {} : g.calls, flight: g.flight, history: g.history,
 });
 function restore(data: unknown): Partial<Game> {
   const s = data as Partial<Saved> | null;
   if (!s || typeof s !== 'object' || !s.design || !s.design.klass || !Array.isArray(s.design.instruments) || !Array.isArray(s.players)) return {};
-  const out: Partial<Game> = { ...s };
-  if (s.stage === 'debrief' && typeof s.seed === 'number') out.result = simulate(s.design, s.seed);
+  const out: Partial<Game> = { ...s, calls: s.calls && typeof s.calls === 'object' ? s.calls : {}, flight: typeof s.flight === 'number' ? s.flight : 0, history: Array.isArray(s.history) ? s.history : [] };
+  if (s.stage === 'debrief' && typeof s.seed === 'number') out.result = simulate(s.design, s.seed, undefined, out.calls);
   return out;
 }
 
@@ -47,22 +48,32 @@ function App({ boot }: { boot: Partial<Game> }) {
   const runMc = () => update({ mc: monteCarlo(g.design, 1000), mcKey: JSON.stringify(g.design) });
   const pass = (rec: GateRecord) => {
     const gates = [...g.gates.filter((x) => x.gate !== rec.gate), rec];
-    if (g.stage === 'test') update({ gates, result: simulate(g.design, g.seed, b), stage: 'fly', reached: Math.max(g.reached, 4) });
+    if (g.stage === 'test') update({ gates, calls: {}, flight: g.flight + 1, result: simulate(g.design, g.seed, b, {}), stage: 'fly', reached: Math.max(g.reached, 4) });
     else update({ gates, stage: STEPS[idx + 1].id, reached: Math.max(g.reached, idx + 1) });
   };
   const setDesign = (design: Design) => { setRipple([]); update({ design }); };
+  const call = (id: string, option: string) => {
+    const calls = { ...g.calls, [id]: option };
+    update({ calls, result: simulate(g.design, g.seed, b, calls) });
+  };
+  const toDebrief = () => {
+    const res = g.result!;
+    const score = scoreFlight(res, b, g.gates, g.mc && !stale ? g.mc.success : null, g.players.length);
+    const run: Run = { flight: g.flight, seed: g.seed, design: g.design, total: score.total, science: res.sciencePoints, costM: res.finalCostM, headline: headlineOf(res, b.klass.scienceTarget) };
+    update({ stage: 'debrief', reached: 5, history: [...g.history.filter((r) => r.flight !== g.flight), run].slice(-8) });
+  };
 
   let body: JSX.Element;
   if (g.stage === 'setup') {
     body = <div className="stage wide"><Setup g={g} update={update} start={() => update({ stage: 'pitch' })} /></div>;
   } else if (g.stage === 'fly' && g.result) {
-    body = <div className="stage wide"><div className="work"><Fly key={`${g.seed}-${g.result.events.length}`} g={g} res={g.result} done={() => update({ stage: 'debrief', reached: 5 })} /></div></div>;
+    body = <div className="stage wide"><div className="work"><Fly key={g.flight} g={g} res={g.result} done={toDebrief} call={call} /></div></div>;
   } else if (g.stage === 'debrief' && g.result) {
     body = (
       <div className="stage wide"><div className="work">
-        <Debrief g={g} b={b} res={g.result}
+        <Debrief g={g} b={b} res={g.result} mc={stale ? null : g.mc}
           again={() => update({ stage: 'build' })}
-          newLuck={() => { const seed = 1 + Math.floor(Math.random() * 99999); update({ seed, result: simulate(g.design, seed, b), stage: 'fly' }); }}
+          newLuck={() => { const seed = 1 + Math.floor(Math.random() * 99999); update({ seed, calls: {}, flight: g.flight + 1, result: simulate(g.design, seed, b, {}), stage: 'fly' }); }}
           reset={() => { setRipple([]); setG(newGame()); }} />
       </div></div>
     );

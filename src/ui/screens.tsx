@@ -1,13 +1,14 @@
 import { ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { C_KM_S, fmtDate, jdFromDate } from '../sim/astro';
 import {
-  ADCS, ANTENNAS, APOPHIS, ARRAY, BATTERIES, CLASSES, DATA_CHECKED, FLYBY_PASSES, INSTRUMENTS, OBJECTIVES, PROPS, RADIOS, RAMSES_SRC,
-  REDUNDANCY, RISK_CLASS_SRC, ROCKETS, Redundancy, STANDOFFS, STORAGES, TESTS, rocketCapacityKg, Choice,
+  ADCS, ANTENNAS, APOPHIS, ARRAY, BATTERIES, BRIEFS, CLASSES, DATA_CHECKED, FLYBY_PASSES, INSTRUMENTS, OBJECTIVES, PROPS, RADIOS, RAMSES_SRC,
+  REDUNDANCY, RISK_CLASS_SRC, ROCKETS, Redundancy, STANDOFFS, STORAGES, TESTS, rocketCapacityKg, Choice, briefOf,
 } from '../sim/data';
-import { Budgets, Design, LAST_ARRIVAL_JD, MIN_TOF_DAYS, SnowballStep, bestArrival, defaultDesign, earthKmAt, evaluate, snowball } from '../sim/design';
+import { Check, runChecks } from '../sim/checks';
+import { Budgets, CONSOLES, Design, LAST_ARRIVAL_JD, MIN_TOF_DAYS, SnowballStep, bestArrival, defaultDesign, earthKmAt, evaluate, snowball } from '../sim/design';
 import { FlightResult, McResult, monteCarlo, scoreFlight, simulate } from '../sim/flight';
 import { CostCurve, CraftView, LaunchChart, OddsChart, OrbitView, Postcard, RAMP_CSS, Telemetry } from './charts';
-import { DepthContext, FindingRow, Game, Lamp, Poll, STEPS, SrcTag, Term, decodeShare, detail, encodeShare, kg, money, pct, rate } from './core';
+import { DepthContext, FindingRow, Game, Lamp, Poll, STEPS, SrcTag, Term, consoleOwners, decodeShare, detail, diffDesign, encodeShare, headlineOf, kg, money, pct, rate } from './core';
 
 type Set = (patch: Partial<Design>) => void;
 const todayJd = () => Date.now() / 86400000 + 2440587.5;
@@ -42,6 +43,19 @@ export function Setup({ g, update, start }: { g: Game; update: (p: Partial<Game>
           <OrbitView launchJd={g.design.launchJd} arriveJd={g.design.arriveJd} nowJd={now} size={340} arc={false} />
           <figcaption className="small muted">Earth and Apophis today, from published orbital elements. The red ring marks where they meet. <SrcTag src={APOPHIS.elementsSrc} /></figcaption>
         </figure>
+      </section>
+      <section className="panel">
+        <h3>Choose your mission</h3>
+        <div className="grid two">
+          {BRIEFS.map((x) => (
+            <button type="button" key={x.id} className="card" aria-pressed={g.design.scenario === x.id}
+              onClick={() => g.design.scenario !== x.id && update({ design: defaultDesign(x.klass, x.id), mc: null, mcKey: '', gates: [], reached: 0 })}>
+              <span className="name">{x.name} <span className="tag">{x.tag}</span></span>
+              <span>{x.blurb}</span>
+              <span className="what">{x.twist}</span>
+            </button>
+          ))}
+        </div>
       </section>
       <section className="panel">
         <h3>Crew</h3>
@@ -80,13 +94,48 @@ export function Setup({ g, update, start }: { g: Game; update: (p: Partial<Game>
         }}>Load</button>
         {bad && <span className="small" role="alert">That code could not be read. Check that all of it was copied.</span>}
       </div>
+      <Validation />
     </div>
+  );
+}
+
+/** Runs the model against published values in the player's own browser. */
+function Validation() {
+  const [checks, setChecks] = useState<Check[] | null>(null);
+  const good = checks ? checks.filter((c) => c.ok).length : 0;
+  return (
+    <section className="panel">
+      <h3>How real is this?</h3>
+      <p className="muted small">The orbits, launch windows, rocket, solar panel and radio models are compared with published numbers. Press the button and your browser repeats every comparison now, with nothing looked up.</p>
+      <div className="row">
+        <button type="button" className="btn ghost small" onClick={() => setChecks(runChecks())}>{checks ? 'Run the checks again' : 'Run the checks'}</button>
+        {checks && <span className="small" role="status"><Lamp s={good === checks.length ? 'green' : 'amber'} /> {good} of {checks.length} agree with the published values.</span>}
+      </div>
+      {checks && (
+        <div className="chart-wrap">
+          <table>
+            <thead><tr><th></th><th>Check</th><th>This game computes</th><th>Published</th><th>Source</th></tr></thead>
+            <tbody>
+              {checks.map((c) => (
+                <tr key={c.what}>
+                  <td><Lamp s={c.ok ? 'green' : 'red'} /></td>
+                  <td>{c.what}{c.note && <div className="small muted">{c.note}</div>}</td>
+                  <td className="num">{c.ours}</td><td className="num">{c.published}</td><td><SrcTag src={c.src} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
 // ================================================================ pitch
 export function Pitch({ d, set, setDesign }: { d: Design; set: Set; setDesign: (d: Design) => void }) {
   const klass = CLASSES.find((c) => c.id === d.klass)!;
+  const brief = briefOf(d.scenario);
+  const target = Math.round(klass.scienceTarget * brief.targetMult);
   const points = OBJECTIVES.filter((o) => d.objectives.includes(o.id)).reduce((s, o) => s + o.weight, 0);
   return (
     <>
@@ -97,17 +146,17 @@ export function Pitch({ d, set, setDesign }: { d: Design; set: Set; setDesign: (
         <h3>Mission class <SrcTag src={RISK_CLASS_SRC} /></h3>
         <div className="grid two">
           {CLASSES.map((c) => (
-            <button type="button" key={c.id} className="card" aria-pressed={d.klass === c.id} onClick={() => d.klass !== c.id && setDesign({ ...defaultDesign(c.id), objectives: d.objectives })}>
+            <button type="button" key={c.id} className="card" aria-pressed={d.klass === c.id} onClick={() => d.klass !== c.id && setDesign({ ...defaultDesign(c.id, d.scenario), objectives: d.objectives })}>
               <span className="name">{c.name} <span className="tag">{c.nasaClass}</span></span>
               <span className="facts num"><span>cap {money(c.capM)}</span><span>{c.devMonths} months to build</span></span>
               <span className="what">{c.blurb}</span>
             </button>
           ))}
         </div>
-        <p className="muted small">Building starts on 1 December 2026. A {klass.name} cannot launch before {fmtDate(jdFromDate(2026, 12, 1) + klass.devMonths * 30.44)}. Cost caps and build times are game values.</p>
+        <p className="muted small">{brief.name}: building starts on {fmtDate(brief.startJd)}. A {klass.name} cannot launch before {fmtDate(brief.startJd + klass.devMonths * 30.44)}. Cost caps and build times are game values.</p>
       </section>
       <section className="panel">
-        <h3>Science objectives <span className="num">{points} points chosen · {klass.scienceTarget} is a full score for a {klass.name}</span></h3>
+        <h3>Science objectives <span className="num">{points} points chosen · {target} is a full score for a {klass.name}</span></h3>
         <div className="grid two">
           {OBJECTIVES.map((o) => {
             const on = d.objectives.includes(o.id);
@@ -409,56 +458,100 @@ export function TestScreen({ d, b, set }: { d: Design; b: Budgets; set: Set }) {
 }
 
 // ================================================================ fly
-export function Fly({ g, res, done }: { g: Game; res: FlightResult; done: () => void }) {
+export function Fly({ g, res, done, call }: { g: Game; res: FlightResult; done: () => void; call: (id: string, option: string) => void }) {
   const d = g.design;
+  const events = useMemo(() => [...res.events].sort((x, y) => x.jd - y.jd || x.n - y.n), [res]);
   const first = Math.min(d.launchJd - 6, ...res.events.map((e) => e.jd));
   const last = Math.max(...res.events.map((e) => e.jd), d.launchJd + 1) + 1;
-  const arrive = Math.min(last, Math.max(first + 1, res.arrivedJd));
+  const arrive = Math.min(last - 0.5, Math.max(first + 1, res.arrivedJd));
+  // cruise takes 35% of the film, operations the rest
+  const jdOf = (x: number) => (x < 0.35 ? first + (x / 0.35) * (arrive - first) : arrive + ((x - 0.35) / 0.65) * (last - arrive));
+  const pOf = (jd: number) => (jd <= arrive ? 0.35 * Math.max(0, (jd - first) / (arrive - first)) : 0.35 + 0.65 * Math.min(1, (jd - arrive) / (last - arrive)));
   const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const [p, setP] = useState(reduce ? 1 : 0); // progress 0..1
   const [playing, setPlaying] = useState(!reduce);
   const [speed, setSpeed] = useState(1);
   const logRef = useRef<HTMLDivElement>(null);
+  const resume = useRef<number | null>(null);
+  // The film stops at the next call the team has not made yet.
+  const pending = res.decisions.find((x) => !x.byPlayer) ?? null;
+  const pLimit = pending ? pOf(pending.jd) : 1;
+  const pe = Math.min(p, pLimit);
+  const waiting = !!pending && p >= pLimit;
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || waiting) return;
     const id = setInterval(() => setP((x) => Math.min(1, x + (0.05 / 34) * speed)), 50);
     return () => clearInterval(id);
-  }, [playing, speed]);
-  useEffect(() => { if (p >= 1) setPlaying(false); }, [p]);
-  // cruise takes 35% of the film, operations the rest
-  const jd = p < 0.35 ? first + (p / 0.35) * (arrive - first) : arrive + ((p - 0.35) / 0.65) * (last - arrive);
-  const shown = res.events.filter((e) => e.jd <= jd || p >= 1);
+  }, [playing, speed, waiting]);
+  useEffect(() => { if (p >= 1 && !pending) setPlaying(false); }, [p, pending]);
+  useEffect(() => {
+    // After a call the flight is simulated again. Pick the film up at the same date.
+    if (resume.current === null) return;
+    const jd = resume.current;
+    resume.current = null;
+    setP((x) => (x >= 1 ? 1 : Math.min(1, pOf(jd) + 0.001)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [res]);
+  const jd = jdOf(pe);
+  const over = pe >= 1 && !pending;
+  const shown = events.filter((e) => (over || e.jd <= jd) && (!pending || e.n < pending.n));
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [shown.length]);
   const light = earthKmAt(Math.max(d.launchJd, Math.min(jd, APOPHIS.flybyJd + 30))) / C_KM_S;
   const stays = d.missionType === 'rendezvous' && !res.becameFlyby && res.launched;
+  const flown = res.launched && (!pending || pending.phase !== 'launch');
+  const owners = consoleOwners(g.players);
+  const owner = pending ? owners[CONSOLES.findIndex((c) => c.id === pending.console)] : null;
+  const made = res.decisions.filter((x) => x.byPlayer);
   return (
     <>
-      <Head eyebrow={`Phase E · operations · world number ${g.seed}`} title={`${g.mission || 'Mission'} is flying`} />
+      <Head eyebrow={`Phase E · operations · world number ${g.seed}`} title={`${g.mission || 'Mission'} ${!res.launched && over ? 'never left Earth' : flown ? 'is flying' : 'is on the pad'}`} />
+      {waiting && pending && (
+        <section className="poll call" aria-live="assertive" aria-label="A call for the flight team">
+          <div className="head">
+            <span className="eyebrow">{fmtDate(pending.jd)} · {CONSOLES.find((c) => c.id === pending.console)!.name} console · {owner === null || owner === undefined ? (g.players.length > 1 ? 'the team decides' : 'your call') : `${g.players[owner]}'s call`}</span>
+            <h2>{pending.title}</h2>
+            <p>{pending.text}</p>
+          </div>
+          <div className="grid two">
+            {pending.options.map((o) => (
+              <button type="button" key={o.id} className="card" onClick={() => { resume.current = pending.jd; call(pending.id, o.id); }}>
+                <span className="name">{o.label}</span><span className="what">{o.what}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="split">
         <section className="panel">
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <div><div className="eyebrow">Mission date</div><div className="score" style={{ fontSize: '2.6rem' }}>{fmtDate(jd)}</div></div>
-            <div><div className="eyebrow">Radio delay, one way</div><div className="num" style={{ fontSize: '1.2rem' }}>{jd < d.launchJd || !res.launched ? '—' : light >= 60 ? `${Math.floor(light / 60)} min ${Math.round(light % 60)} s` : `${light.toFixed(1)} s`}</div></div>
+            <div><div className="eyebrow">Radio delay, one way</div><div className="num" style={{ fontSize: '1.2rem' }}>{jd < d.launchJd || !flown ? '—' : light >= 60 ? `${Math.floor(light / 60)} min ${Math.round(light % 60)} s` : `${light.toFixed(1)} s`}</div></div>
           </div>
           <div className="chart-wrap" style={{ display: 'flex', justifyContent: 'center' }}>
-            <OrbitView launchJd={d.launchJd} arriveJd={d.arriveJd} nowJd={res.launched ? jd : d.launchJd} stays={stays} size={340} />
+            <OrbitView launchJd={d.launchJd} arriveJd={d.arriveJd} nowJd={flown ? jd : d.launchJd} stays={stays} size={340} />
           </div>
           <div className="row">
-            <button type="button" className="btn small" onClick={() => { if (p >= 1) setP(0); setPlaying(!playing || p >= 1); }}>{p >= 1 ? 'Replay' : playing ? 'Pause' : 'Play'}</button>
+            <button type="button" className="btn small" disabled={waiting} onClick={() => { if (over) setP(0); setPlaying(!playing || over); }}>{over ? 'Replay' : playing ? 'Pause' : 'Play'}</button>
             <button type="button" className="btn ghost small" aria-pressed={speed === 4} onClick={() => setSpeed(speed === 1 ? 4 : 1)}>{speed === 1 ? 'Faster' : 'Normal speed'}</button>
-            <button type="button" className="btn ghost small" onClick={() => setP(1)}>Skip to the end</button>
+            <button type="button" className="btn ghost small" disabled={waiting || over} onClick={() => { setP(1); setPlaying(true); }}>{pending ? 'Skip to the next call' : 'Skip to the end'}</button>
           </div>
-          <input type="range" id="scrub" aria-label="Mission timeline" min={0} max={1} step={0.002} value={p} onChange={(e) => { setP(Number(e.target.value)); setPlaying(false); }} />
+          <input type="range" id="scrub" aria-label="Mission timeline" min={0} max={1} step={0.002} value={pe} onChange={(e) => { setP(Math.min(pLimit, Number(e.target.value))); setPlaying(false); }} />
+          {made.length > 0 && (
+            <div className="small muted">
+              Calls made: {made.map((x) => `${x.title.toLowerCase()} → ${x.options.find((o) => o.id === x.chosen)!.label.toLowerCase()}`).join(' · ')}
+            </div>
+          )}
         </section>
         <section className="panel">
           <h3>Flight log</h3>
           <div className="log" ref={logRef} aria-live="polite">
-            {shown.map((e, k) => (
-              <div className={`event ${e.tone}`} key={k}>
+            {shown.map((e) => (
+              <div className={`event ${e.tone}`} key={e.n}>
                 <span className="when">{fmtDate(e.jd)}</span><Lamp s={e.tone} />
                 <div><b>{e.title}.</b> {e.text}</div>
               </div>
             ))}
+            {waiting && <div className="event warn"><span className="when">{fmtDate(jd)}</span><Lamp s="warn" /><div><b>Waiting for a call.</b> The flight team needs a decision.</div></div>}
           </div>
           {res.samples.length > 1 && jd >= res.samples[0].jd && (
             <>
@@ -466,7 +559,7 @@ export function Fly({ g, res, done }: { g: Game; res: FlightResult; done: () => 
               <div className="chart-wrap"><Telemetry samples={res.samples} nowJd={jd} pick={(s) => s.sentGb} label={`Data safely on Earth, Gb (now ${(res.samples.filter((s) => s.jd <= jd).slice(-1)[0] ?? res.samples[0]).sentGb.toFixed(1)})`} /></div>
             </>
           )}
-          {p >= 1 && <button type="button" className="btn" onClick={done}>Read the debrief</button>}
+          {over && <button type="button" className="btn" onClick={done}>Read the debrief</button>}
         </section>
       </div>
     </>
@@ -474,11 +567,13 @@ export function Fly({ g, res, done }: { g: Game; res: FlightResult; done: () => 
 }
 
 // ================================================================ debrief
-export function Debrief({ g, b, res, again, newLuck, reset }: { g: Game; b: Budgets; res: FlightResult; again: () => void; newLuck: () => void; reset: () => void }) {
-  const score = useMemo(() => scoreFlight(res, b, g.gates, g.mc ? g.mc.success : null, g.players.length), [res, b, g.gates, g.mc, g.players.length]);
+export function Debrief({ g, b, res, mc, again, newLuck, reset }: { g: Game; b: Budgets; res: FlightResult; mc: McResult | null; again: () => void; newLuck: () => void; reset: () => void }) {
+  const score = useMemo(() => scoreFlight(res, b, g.gates, mc ? mc.success : null, g.players.length), [res, b, g.gates, mc, g.players.length]);
   const frac = res.sciencePoints / b.klass.scienceTarget;
-  const headline = !res.launched ? 'Never flew' : res.lost ? 'Mission lost' : frac >= 0.85 ? 'Mission success' : frac >= 0.5 ? 'Partial success' : 'Science fell short';
+  const headline = headlineOf(res, b.klass.scienceTarget);
   const [copied, setCopied] = useState('');
+  const calls = res.decisions.filter((x) => x.byPlayer);
+  const runs = g.history;
   const code = encodeShare(g);
   const parts: [string, number, number, string][] = [
     ['Science value', score.science, 40, score.notes.science], ['Mission performance', score.performance, 20, score.notes.performance],
@@ -534,16 +629,50 @@ export function Debrief({ g, b, res, again, newLuck, reset }: { g: Game; b: Budg
         {bad.length === 0 && good.length === 0 && <p className="small">Nothing notable went wrong or was narrowly avoided.</p>}
         {bad.map((c, k) => <div className="finding" key={`b${k}`}><Lamp s="red" /><div><b>{c.effect}</b> <span className="fix">{c.decision}</span></div></div>)}
         {good.map((c, k) => <div className="finding" key={`g${k}`}><Lamp s="green" /><div><b>{c.effect}</b> <span className="fix">{c.decision}</span></div></div>)}
+        {calls.length > 0 && (
+          <div className="chart-wrap">
+            <table>
+              <thead><tr><th>Call made in flight</th><th>Date</th><th>The team chose</th></tr></thead>
+              <tbody>{calls.map((x) => <tr key={x.id}><td>{x.title}</td><td className="num">{fmtDate(x.jd)}</td><td>{x.options.find((o) => o.id === x.chosen)!.label}</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
       </section>
+      {runs.length > 1 && (
+        <section className="panel">
+          <h3>Flight history</h3>
+          <p className="muted small">Every flight of this mission so far. The same world number means the same luck, so the score change comes from your changes alone.</p>
+          <div className="chart-wrap">
+            <table>
+              <thead><tr><th className="r">Flight</th><th className="r">World</th><th className="r">Score</th><th>Outcome</th><th className="r">Science</th><th className="r">Final cost</th><th>What changed from the flight before</th></tr></thead>
+              <tbody>
+                {runs.map((r, k) => {
+                  const prev = k > 0 ? runs[k - 1] : null;
+                  const diff = prev ? diffDesign(prev.design, r.design) : [];
+                  const delta = prev ? Math.round(r.total) - Math.round(prev.total) : 0;
+                  return (
+                    <tr key={r.flight}>
+                      <td className="r num">{k + 1}</td><td className="r num">{r.seed}</td>
+                      <td className="r num">{Math.round(r.total)}{prev && <span style={{ color: delta > 0 ? 'var(--go)' : delta < 0 ? 'var(--nogo)' : undefined }}> ({delta > 0 ? '+' : delta < 0 ? '−' : '±'}{Math.abs(delta)})</span>}</td>
+                      <td>{r.headline}</td><td className="r num">{r.science.toFixed(0)}</td><td className="r num">{money(r.costM)}</td>
+                      <td className="small">{!prev ? 'First flight' : diff.length === 0 ? (prev.seed === r.seed ? 'Same design, different calls in flight' : 'Same design, new luck') : `${diff.slice(0, 6).join(' · ')}${diff.length > 6 ? ` · and ${diff.length - 6} more` : ''}${prev.seed !== r.seed ? ' · new luck' : ''}`}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       <div className="split">
         <section className="panel">
           <h3>The odds</h3>
-          {g.mc ? (
+          {mc ? (
             <>
-              <div className="chart-wrap"><OddsChart mc={g.mc} mark={frac} /></div>
-              <p className="small">Before launch, {pct(g.mc.success)} of 1,000 simulated flights of this design succeeded. {res.lost || frac < 0.5 ? (g.mc.success >= 0.7 ? 'This flight was one of the unlucky ones. The design was sound.' : 'This result was always likely. The design carried the risk.') : g.mc.success >= 0.7 ? 'This flight went the way a sound design usually goes.' : 'This flight beat the odds. A different world would probably have ended worse.'}</p>
+              <div className="chart-wrap"><OddsChart mc={mc} mark={frac} /></div>
+              <p className="small">Before launch, {pct(mc.success)} of 1,000 simulated flights of this design succeeded. {res.lost || frac < 0.5 ? (mc.success >= 0.7 ? 'This flight was one of the unlucky ones. The design was sound.' : 'This result was always likely. The design carried the risk.') : mc.success >= 0.7 ? 'This flight went the way a sound design usually goes.' : 'This flight beat the odds. A different world would probably have ended worse.'}</p>
             </>
-          ) : <p className="small muted">You launched without flying the 1,000 simulated flights, so nobody knew the odds.</p>}
+          ) : <p className="small muted">You launched without flying this exact design 1,000 times first, so nobody knew the odds.</p>}
         </section>
         <section className="panel">
           <h3>Reality check <SrcTag src={RAMSES_SRC} /></h3>

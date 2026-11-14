@@ -43,7 +43,7 @@ concept, plan and research were done the evening before.
 
 ## How the AI's work was checked
 
-- 12 automated tests compare the simulation with published values (see
+- 16 automated tests, most comparing the simulation with published values (see
   DATA_SOURCES.md).
 - Full missions were played in a headless browser, solo and with four players.
 - Every number that is not from a public source is labelled "game value" in

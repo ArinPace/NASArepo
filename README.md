@@ -26,8 +26,15 @@ it is also at `https://arinpace.github.io/NASArepo/`.)
 - **A thousand flights.** Before launch the game flies the design 1,000 times
   and reports how often it survives and succeeds, plus the cost that 70% of
   outcomes stay under (NASA's joint confidence level rule).
+- **Calls in flight.** The mission is managed, not just watched. Hold the
+  launch for weather or go? Shelter from a solar storm during the flyby or
+  keep observing? Each call goes to the console that owns it.
 - **Causes, not dice.** Each flight is one seeded world. Fly the same world
-  again with one change and see exactly what that change bought.
+  again with one change and the flight history shows what that change bought.
+- **Two missions.** *Witness* gives 28 months to rendezvous with Apophis.
+  *Last call* starts a year later, when only fast flybys are left.
+- **How real is this?** A button on the start screen reruns seven comparisons
+  with published values in the player's own browser.
 - **Three depths.** Cadet (plain words), Engineer (numbers), Chief engineer
   (the equations).
 
@@ -41,7 +48,7 @@ In this scenario **time** is the critical one: Apophis will not wait.
 ```
 npm install
 npm run build      # writes docs/index.html
-npm test           # 12 tests against published values
+npm test           # 16 tests, most against published values
 npm run dev        # rebuilds on change, serves http://localhost:8000
 ```
 
@@ -52,7 +59,8 @@ npm run dev        # rebuilds on change, serves http://localhost:8000
 | `src/sim/astro.ts` | Kepler propagation, Lambert solver, patched conics |
 | `src/sim/data.ts` | Bundled data, each entry with its source |
 | `src/sim/design.ts` | Budgets (mass, power, data, cost, time, delta-v) and review findings |
-| `src/sim/flight.ts` | Seeded flight simulation, 1,000 flights, scoring |
+| `src/sim/flight.ts` | Seeded flight simulation, in-flight calls, 1,000 flights, scoring |
+| `src/sim/checks.ts` | The live comparisons with published values |
 | `src/ui/` | React screens, charts and the poll |
 | `tests/` | Checks against Vallado's Lambert example, NASA's Apophis flyby time, ESA's Ramses trajectory, LRO, OSIRIS-REx, SpaceX figures |
 

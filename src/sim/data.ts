@@ -33,7 +33,31 @@ export const APOPHIS = {
   rotationH: 30.6,
 };
 
-export const PROJECT_START_JD = jdFromDate(2026, 12, 1);
+// ---------------------------------------------------------------- mission briefs
+/** A scenario: the same asteroid and physics, a different starting position. */
+export interface Brief {
+  id: string;
+  name: string;
+  tag: string;
+  startJd: number; // the day building can begin
+  targetMult: number; // scales the science a class is expected to return
+  klass: 'smallsat' | 'explorer' | 'flagship'; // suggested class
+  blurb: string;
+  twist: string;
+}
+export const BRIEFS: Brief[] = [
+  {
+    id: 'apophis', name: 'Witness', tag: 'The full mission', startJd: jdFromDate(2026, 12, 1), targetMult: 1, klass: 'explorer',
+    blurb: 'Work starts on 1 December 2026. You have 28 months to be at Apophis before Earth pulls on it, and to stay through the flyby.',
+    twist: 'Time is on your side if you find the right launch window.',
+  },
+  {
+    id: 'lastcall', name: 'Last call', tag: 'Hard: 16 months', startJd: jdFromDate(2027, 12, 1), targetMult: 0.6, klass: 'smallsat',
+    blurb: 'The big mission was cancelled. Work starts on 1 December 2027 with 16 months left. The slow, cheap routes have already closed.',
+    twist: 'Only fast routes remain. Get anything there and bring home what you can.',
+  },
+];
+export const briefOf = (id: string): Brief => BRIEFS.find((x) => x.id === id) ?? BRIEFS[0];
 
 // ---------------------------------------------------------------- classes
 export type ClassId = 'smallsat' | 'explorer' | 'flagship';

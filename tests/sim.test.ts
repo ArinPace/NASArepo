@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ROCKETS, rocketCapacityKg, ARRAY } from '../src/sim/data';
 import { dataRateKbps, defaultDesign, evaluate, Design } from '../src/sim/design';
-import { simulate, monteCarlo, scoreFlight } from '../src/sim/flight';
+import { simulate, monteCarlo, scoreFlight, Decision, FlightResult } from '../src/sim/flight';
 import { AU_KM, jdFromDate } from '../src/sim/astro';
 
 test('rocket model: fitted to GTO and Mars figures, it reproduces the published LEO payloads within 15%', () => {
@@ -51,4 +51,70 @@ test('flights are repeatable, and testing never makes a design less safe', () =>
   assert.ok(tested.meanScience >= bare.meanScience - 0.5 || tested.success < 0.2, 'science should not fall with testing unless the schedule broke');
   const s = scoreFlight(a, evaluate(d), [], null, 1);
   assert.ok(s.total >= 0 && s.total <= 100);
+});
+
+test('in-flight calls: the past never changes when the team makes a different call', () => {
+  const base: Design = { ...defaultDesign('explorer'), launchJd: jdFromDate(2028, 5, 8), arriveJd: jdFromDate(2029, 2, 25), instruments: ['cam', 'tele', 'vnir', 'radio'], adcs: 'precise', antenna: 'mga', radio: 'r5', storage: 's1', prop: 'biprop' };
+  const flyby: Design = { ...defaultDesign('smallsat'), missionType: 'flyby', rocket: 'small', launchJd: jdFromDate(2028, 12, 1), arriveJd: jdFromDate(2029, 4, 9) };
+  const seen = new Map<string, number>();
+  let checked = 0;
+  for (const d of [base, flyby]) {
+    for (let seed = 1; seed <= 150; seed++) {
+      const calls: Record<string, string> = {};
+      for (let step = 0; step < 8; step++) {
+        const res: FlightResult = simulate(d, seed, undefined, calls);
+        const next: Decision | undefined = res.decisions.find((x) => !x.byPlayer);
+        if (!next) break;
+        seen.set(next.id.replace(/-\d+$/, ''), (seen.get(next.id.replace(/-\d+$/, '')) ?? 0) + 1);
+        assert.ok(next.options.some((o) => o.id === next.chosen), 'the default is one of the options');
+        assert.equal(new Set(next.options.map((o) => o.id)).size, next.options.length);
+        const before = res.events.filter((e) => e.n < next.n).map((e) => `${e.jd.toFixed(3)} ${e.title}`);
+        for (const o of next.options) {
+          const alt: FlightResult = simulate(d, seed, undefined, { ...calls, [next.id]: o.id });
+          assert.deepEqual(alt.events.filter((e) => e.n < next.n).map((e) => `${e.jd.toFixed(3)} ${e.title}`), before, `${next.id} option ${o.id} rewrote the past`);
+          const made: Decision = alt.decisions.find((x) => x.id === next.id)!;
+          assert.ok(made.byPlayer && made.chosen === o.id);
+          checked++;
+        }
+        calls[next.id] = next.options[(seed + step) % next.options.length].id;
+      }
+    }
+  }
+  console.log(`  ${checked} alternative calls checked. Calls met: ${[...seen.entries()].map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  for (const id of ['wx', 'watch', 'storm', 'recorder', 'mosaic']) assert.ok((seen.get(id) ?? 0) > 0, `${id} never came up`);
+});
+
+test('in-flight calls: launching through marginal winds loses about one flight in eight; holding loses none to wind', () => {
+  const d: Design = { ...defaultDesign('explorer'), launchJd: jdFromDate(2028, 5, 8), arriveJd: jdFromDate(2029, 2, 25), prop: 'biprop' };
+  let asked = 0, lostGo = 0, lostHold = 0;
+  for (let seed = 1; seed <= 3000; seed++) {
+    const res = simulate(d, seed);
+    if (!res.decisions.some((x) => x.id === 'wx')) continue;
+    asked++;
+    if (simulate(d, seed, undefined, { wx: 'go' }).events.some((e) => e.text.includes('wind shear'))) lostGo++;
+    if (simulate(d, seed, undefined, { wx: 'hold' }).events.some((e) => e.text.includes('wind shear'))) lostHold++;
+  }
+  console.log(`  weather call came up in ${asked} of 3,000 worlds; GO lost ${lostGo} (${((100 * lostGo) / asked).toFixed(1)}%), hold lost ${lostHold}`);
+  assert.ok(asked > 800 && asked < 1300);
+  assert.ok(lostGo / asked > 0.09 && lostGo / asked < 0.16);
+  assert.equal(lostHold, 0);
+});
+
+test('the live validation panel agrees with the published values', async () => {
+  const { runChecks } = await import('../src/sim/checks');
+  const checks = runChecks();
+  for (const c of checks) console.log(`  ${c.ok ? 'ok ' : 'BAD'} ${c.what}: ${c.ours} (published: ${c.published})`);
+  assert.ok(checks.length >= 7);
+  assert.ok(checks.every((c) => c.ok));
+});
+
+test('Last call: with 16 months, no rendezvous is possible and a fast flyby still works', () => {
+  const d = defaultDesign('smallsat', 'lastcall');
+  const b = evaluate(d);
+  assert.equal(d.missionType, 'flyby');
+  assert.ok(b.traj.ok, 'the default flyby has a valid path');
+  assert.ok(b.traj.vinfArr > 4, `late routes arrive fast: ${b.traj.vinfArr.toFixed(1)} km/s`);
+  console.log(`  default Last call flyby: launch energy ${b.traj.c3.toFixed(1)} km2/s2, arrival ${b.traj.vinfArr.toFixed(1)} km/s, slack ${Math.round(b.time.slackDays)} days, findings: ${b.findings.map((f) => f.id).join(', ') || 'none'}`);
+  const stop = evaluate({ ...d, missionType: 'rendezvous' });
+  assert.ok(!stop.mass.feasible || stop.mass.margin < 0 || stop.findings.some((f) => f.level === 'red'), 'stopping at Apophis from a late launch should not close');
 });

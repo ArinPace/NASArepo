@@ -107,6 +107,9 @@ label { font-size: 0.85rem; color: var(--muted); display: flex; flex-direction: 
 /* ---------- the poll ---------- */
 .poll { border: 1px solid var(--chalk); background: var(--panel); padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 .poll h2 { font-size: 2.6rem; }
+.poll.call { border-color: var(--hold); box-shadow: 0 0 0 1px var(--hold), 0 0 34px color-mix(in srgb, var(--hold) 22%, transparent); animation: rise 0.35s ease both; }
+.poll.call h2 { font-size: 2.2rem; }
+.poll.call p { max-width: 70ch; }
 .poll .consoles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .console { border: 1px solid var(--rule); background: var(--panel-2); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .console header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

@@ -5,7 +5,7 @@ import {
 } from './astro';
 import {
   ADCS, ANTENNAS, APOPHIS, ARRAY, BATTERIES, CLASSES, ClassId, DSN, FLYBY_PASSES, INSTRUMENTS, MissionClass, OBJECTIVES,
-  PROJECT_START_JD, PROPS, RADIOS, REDUNDANCY, ROCKETS, Redundancy, Rocket, STANDOFFS, STORAGES, TESTS, rocketCapacityKg,
+  PROPS, briefOf, RADIOS, REDUNDANCY, ROCKETS, Redundancy, Rocket, STANDOFFS, STORAGES, TESTS, rocketCapacityKg,
 } from './data';
 
 export const MIN_TOF_DAYS = 40;
@@ -20,7 +20,7 @@ export const CONSOLES: { id: ConsoleId; name: string; owns: string }[] = [
 ];
 
 export interface Design {
-  scenario: 'apophis';
+  scenario: string; // a mission brief id
   klass: ClassId;
   objectives: string[];
   missionType: 'rendezvous' | 'flyby';
@@ -53,13 +53,14 @@ export function bestArrival(launchJd: number, minBeforeDays = 20): number {
   return bestJd;
 }
 
-export function defaultDesign(klass: ClassId = 'explorer'): Design {
+export function defaultDesign(klass: ClassId = 'explorer', scenario = 'apophis'): Design {
   // A lean, valid starting point on a mediocre launch date. Finding the good
   // window and fitting the craft to the science is the players' job.
-  const launchJd = jdFromDate(2028, 6, 20);
+  const late = scenario === 'lastcall';
+  const launchJd = late ? jdFromDate(2029, 1, 20) : jdFromDate(2028, 6, 20);
   return {
-    scenario: 'apophis', klass, objectives: ['shape'], missionType: 'rendezvous',
-    launchJd, arriveJd: bestArrival(launchJd), standoff: 'mid',
+    scenario, klass, objectives: ['shape'], missionType: late ? 'flyby' : 'rendezvous',
+    launchJd, arriveJd: late ? bestArrival(launchJd, -6) : bestArrival(launchJd), standoff: 'mid',
     rocket: klass === 'smallsat' ? 'shared' : klass === 'explorer' ? 'f9r' : 'f9', instruments: ['cam'],
     arrayM2: 2, autoArray: true, battery: 'b1', antenna: 'mga', radio: 'r5', prop: 'mono', adcs: 'basic', storage: 's1',
     redundancy: 'single', reservePct: 10, tests: [], dsnHoursPerDay: 4,
@@ -166,7 +167,9 @@ export interface Budgets {
 
 export function evaluate(d: Design, trajIn?: Traj): Budgets {
   const traj = trajIn ?? trajectory(d);
-  const klass = find(CLASSES, d.klass);
+  const brief = briefOf(d.scenario);
+  const klass0 = find(CLASSES, d.klass);
+  const klass = brief.targetMult === 1 ? klass0 : { ...klass0, scienceTarget: Math.round(klass0.scienceTarget * brief.targetMult) };
   const rocket = find(ROCKETS, d.rocket);
   const instruments = INSTRUMENTS.filter((i) => d.instruments.includes(i.id));
   const antenna = find(ANTENNAS, d.antenna), radio = find(RADIOS, d.radio), prop = find(PROPS, d.prop);
@@ -232,7 +235,7 @@ export function evaluate(d: Design, trajIn?: Traj): Budgets {
   // ----- time
   const newTech = instruments.filter((i) => i.trl < 7).length;
   const devMonths = klass.devMonths + red.months + newTech + (tests.reduce((s, t) => s + t.weeks, 0) * 0.6) / 4.345; // tests overlap with assembly
-  const readyJd = PROJECT_START_JD + devMonths * 30.44;
+  const readyJd = brief.startJd + devMonths * 30.44;
   const time = { devMonths, readyJd, slackDays: d.launchJd - readyJd, missionMonths };
 
   // ----- image detail
@@ -241,7 +244,7 @@ export function evaluate(d: Design, trajIn?: Traj): Budgets {
   for (const c of cams) {
     let r = c.ifovUrad! * 1e-6 * traj.rangeKm * 1000;
     if (c.needsPointing && !adcs.precise) r *= 3; // jitter blurs a telescope on basic pointing
-    if (traj.vRel > 0) r = Math.max(r, 0.3 * traj.vRel); // motion smear on a fast flyby
+    if (traj.vRel > 0) r = Math.max(r, 0.15 * traj.vRel); // motion smear on a fast flyby
     resolutionM = Math.min(resolutionM, r);
   }
 
